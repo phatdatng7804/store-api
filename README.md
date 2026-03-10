@@ -1,2 +1,8 @@
 # store-api
-BackEnd API 
+
+BackEnd API
+
+### Run
+
+npm install
+npm run dev
