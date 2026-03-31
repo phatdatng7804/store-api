@@ -7,6 +7,6 @@ const sizeSchema = new mongoose.Schema({
         unique: true,
         trim: true
     }
-})
+}, {timestamps: true})
 
-export default mongoose.model("Size", sizeSchema);    
+export default mongoose.model("Size", sizeSchema);

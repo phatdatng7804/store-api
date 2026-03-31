@@ -25,6 +25,6 @@ const userAddressSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     }
-})
+}, {timestamps: true})
 
-export default mongoose.model("UserAddress", userAddressSchema);    
+export default mongoose.model("UserAddress", userAddressSchema);

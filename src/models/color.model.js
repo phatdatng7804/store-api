@@ -13,6 +13,6 @@ const colorSchema = new mongoose.Schema({
         unique: true,
         trim: true
     }
-})
+}, {timestamps: true})
 
-export default mongoose.model("Color", colorSchema);    
+export default mongoose.model("Color", colorSchema);

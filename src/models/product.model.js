@@ -7,6 +7,12 @@ const productSchema = new mongoose.Schema({
         unique: true,
         trim: true
     },
+    slug:{
+        type: String,
+        unique: true,
+        trim: true,
+        lowercase: true
+    },
     description:{
         type: String,
         trim: true
@@ -23,10 +29,13 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Category",
     },
+    images:[{
+        type: String
+    }],
     isDeleted:{
         type: Boolean,
         default: false
     }
-})
+}, {timestamps: true})
 
-export default mongoose.model("Product", productSchema);    
+export default mongoose.model("Product", productSchema);
