@@ -10,4 +10,23 @@ const updateProfileSchema = Joi.object({
     "object.min": "Cần ít nhất 1 trường để cập nhật"
 });
 
-export { updateProfileSchema };
+const createAddressSchema = Joi.object({
+    street: Joi.string().trim().required(),
+    city: Joi.string().trim().required(),
+    district: Joi.string().trim().required(),
+    country: Joi.string().trim().required(),
+    isDefault: Joi.boolean()
+});
+
+const updateAddressSchema = Joi.object({
+    street: Joi.string().trim(),
+    city: Joi.string().trim(),
+    district: Joi.string().trim(),
+    country: Joi.string().trim(),
+    isDefault: Joi.boolean()
+}).min(1).messages({
+    "object.min": "Cần ít nhất 1 trường để cập nhật"
+});
+
+export { updateProfileSchema, createAddressSchema, updateAddressSchema };
+

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import userController from "../controllers/user.controller.js";
 import authenticate from "../middlewares/auth.middleware.js";
-import { updateProfileSchema } from "../validations/user.validation.js";
+import { updateProfileSchema, createAddressSchema, updateAddressSchema } from "../validations/user.validation.js";
 
 const router = Router();
 
@@ -16,7 +16,13 @@ const validate = (schema) => (req, res, next) => {
     next();
 };
 
-// PUT /api/users/profile — phải đăng nhập, chỉ sửa được chính mình
-router.put("/profile", authenticate, validate(updateProfileSchema), userController.updateProfile);
+router.use(authenticate);
+
+router.put("/profile", validate(updateProfileSchema), userController.updateProfile);
+
+router.post("/addresses", validate(createAddressSchema), userController.createAddress);
+router.get("/addresses", userController.getAddresses);
+router.put("/addresses/:id", validate(updateAddressSchema), userController.updateAddress);
+router.delete("/addresses/:id", userController.deleteAddress);
 
 export default router;
