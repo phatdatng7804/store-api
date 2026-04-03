@@ -20,6 +20,14 @@ const productVariantSchema = new mongoose.Schema({
     stock:{
         type: Number,
         required: true
+    },
+    isDeleted:{
+        type: Boolean,
+        default: false
+    },
+    deletedAt:{
+        type: Date,
+        default: null
     }
 }, {timestamps: true})
 
