@@ -1,4 +1,4 @@
-import { verifyToken } from "../utils/jwt.js";
+import { verifyAccessToken } from "../utils/jwt.js";
 
 const authenticate = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -10,7 +10,7 @@ const authenticate = (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     try {
-        const decoded = verifyToken(token);
+        const decoded = verifyAccessToken(token);
         req.user = decoded; // { userId, role }
         next();
     } catch (error) {

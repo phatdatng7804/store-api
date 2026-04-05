@@ -47,6 +47,11 @@ const userSchema = new mongoose.Schema({
         enum: ["Male", "Female", "Other"],
         default: "Other"
     },
+    refreshToken:{
+        type: String,
+        default: null
+    },
+    isActive:{
     isDeleted: {
         type: Boolean,
         default: false
