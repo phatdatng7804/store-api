@@ -34,3 +34,10 @@ npm run dev
 Tùy chọn 2 - mở trực tiếp file:
 
 Mở `frontend/index.html` bằng trình duyệt.
+
+
+### Tải thêm cái này vào backend
+
+```
+npm install express-rate-limit
+```
