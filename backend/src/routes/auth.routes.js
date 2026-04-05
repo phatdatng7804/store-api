@@ -1,7 +1,8 @@
 import { Router } from "express";
 import authController from "../controllers/auth.controller.js";
-import { registerSchema, loginSchema } from "../validations/auth.validation.js";
+import { registerSchema, loginSchema, refreshTokenSchema } from "../validations/auth.validation.js";
 import { limiter } from "../middlewares/rateLimit.middleware.js";
+import authenticate from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -22,5 +23,11 @@ router.post("/register", limiter, validate(registerSchema), authController.regis
 
 // POST /api/auth/login
 router.post("/login", limiter, validate(loginSchema), authController.login);
+
+// POST /api/auth/refresh-token
+router.post("/refresh-token", limiter, validate(refreshTokenSchema), authController.refreshToken);
+
+// POST /api/auth/logout
+router.post("/logout", authenticate, authController.logout);
 
 export default router;
