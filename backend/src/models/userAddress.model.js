@@ -1,30 +1,45 @@
 import mongoose from "mongoose";
 
 const userAddressSchema = new mongoose.Schema({
-    user:{
+    user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        required: true
     },
-    street:{
+    receiverName: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    phone: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    address: {
         type: String,
         required: true
     },
-    city:{
+    city: {
         type: String,
         required: true
     },
-    district:{
+    district: {
         type: String,
         required: true
     },
-    country:{
-        type: String,
-        required: true
-    },
-    isDefault:{
+    isDefault: {
         type: Boolean,
         default: false
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
+    deletedAt: {
+        type: Date,
+        default: null
     }
-}, {timestamps: true})
+}, { timestamps: true });
 
-export default mongoose.model("UserAddress", userAddressSchema);
+export default mongoose.model("UserAddress", userAddressSchema);

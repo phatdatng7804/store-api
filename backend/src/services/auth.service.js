@@ -1,56 +1,60 @@
 import User from "../models/user.model.js";
 import Role from "../models/role.model.js";
-import { generateToken } from "../utils/jwt.js";
 import createError from "http-errors";
 
-const register = async ({ name, email, password, role }) => {
-    // 1. Kiểm tra email đã tồn tại chưa
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-        throw createError.Conflict("Email đã được sử dụng");
+// Helper: format user object cho frontend
+const formatUser = (user) => ({
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    fullName: user.fullName || "",
+    phone: user.phone || "",
+    avatarUrl: user.avatarUrl || "",
+    role: user.role ? { code: user.role.code, name: user.role.name } : null
+});
+
+const register = async ({ username, email, password, fullName, phone }) => {
+    if (!username) throw createError.BadRequest("Tên đăng nhập không được để trống");
+    if (!email) throw createError.BadRequest("Email không được để trống");
+    if (!password) throw createError.BadRequest("Mật khẩu không được để trống");
+
+    const existingUsername = await User.findOne({ username: username.toLowerCase() });
+    if (existingUsername) throw createError.Conflict("Tên đăng nhập đã tồn tại");
+
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) throw createError.Conflict("Email đã được sử dụng");
+
+    // Find USER role
+    let userRole = await Role.findOne({ code: "USER" });
+    if (!userRole) {
+        userRole = await Role.create({ code: "USER", name: "User" });
     }
-    // 2. Tìm role theo tên (mặc định "user" nếu không truyền)
-    const roleName = role || "user";
-    const foundRole = await Role.findOne({ name: roleName });
-    if (!foundRole) {
-        throw createError.BadRequest(`Role "${roleName}" không tồn tại`);
-    }
-    // 3. Tạo user (password tự động hash qua pre-save hook)
+
     const newUser = await User.create({
-        name,
-        email,
+        username: username.toLowerCase(),
+        email: email.toLowerCase(),
         password,
-        role: foundRole._id
+        fullName: fullName || "",
+        phone: phone || "",
+        role: userRole._id
     });
-    // 4. Trả về user (ẩn password), KHÔNG trả token
-    const userResponse = newUser.toObject();
-    delete userResponse.password;
 
-    return { user: userResponse };
+    const populated = await User.findById(newUser._id).populate("role");
+    return { user: formatUser(populated), message: "Đăng ký thành công" };
 };
 
-const login = async ({ email, password }) => {
-    // 1. Tìm user theo email, populate role để lấy tên role
-    const user = await User.findOne({ email }).populate("role", "name");
-    if (!user) {
-        throw createError.Unauthorized("Email hoặc mật khẩu không đúng");
-    }
-    // 2. So sánh password
+const login = async ({ username, password }) => {
+    if (!username || !password) throw createError.BadRequest("Vui lòng nhập tên đăng nhập và mật khẩu");
+
+    const user = await User.findOne({ username: username.toLowerCase() }).populate("role");
+    if (!user) throw createError.Unauthorized("Tên đăng nhập hoặc mật khẩu không đúng");
+
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-        throw createError.Unauthorized("Email hoặc mật khẩu không đúng");
-    }
-    // 3. Kiểm tra tài khoản có active không
-    if (!user.isActive) {
-        throw createError.Forbidden("Tài khoản đã bị vô hiệu hóa");
-    }
-    // 4. Tạo JWT token
-    const token = generateToken({
-        userId: user._id,
-        role: user.role.name
-    });
-    // 5. Chỉ trả token
-    return { token };
+    if (!isMatch) throw createError.Unauthorized("Tên đăng nhập hoặc mật khẩu không đúng");
+
+    if (!user.isActive) throw createError.Forbidden("Tài khoản đã bị vô hiệu hóa");
+
+    return { user: formatUser(user), message: "Đăng nhập thành công" };
 };
 
-export default { register, login };
+export default { register, login, formatUser };
