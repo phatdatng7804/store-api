@@ -24,6 +24,23 @@ const fileToDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
+const mapId = (obj) => {
+  if (Array.isArray(obj)) return obj.map(mapId);
+  if (obj !== null && typeof obj === 'object') {
+    const newObj = { ...obj };
+    if (newObj._id && !newObj.id) {
+      newObj.id = newObj._id;
+    }
+    for (const key in newObj) {
+      if (newObj[key] !== null && typeof newObj[key] === 'object') {
+        newObj[key] = mapId(newObj[key]);
+      }
+    }
+    return newObj;
+  }
+  return obj;
+};
+
 const parseResponse = async (r) => {
   const raw = await r.text();
   const data = raw ? JSON.parse(raw) : null;
@@ -31,7 +48,7 @@ const parseResponse = async (r) => {
     const message = data?.error || data?.message || `HTTP ${r.status}`;
     throw new Error(message);
   }
-  return data;
+  return mapId(data);
 };
 
 const BASE_URL = "http://127.0.0.1:3000";
@@ -127,9 +144,9 @@ function ProductCard({ product, variants, onAddToCart, user, onNavigate, onViewD
         </div>
         <div className="swatches">
           {variants && variants.slice(0, 3).map((v) => (
-            <span 
-              key={v.id} 
-              title={v.color?.name || ""} 
+            <span
+              key={v.id}
+              title={v.color?.name || ""}
               style={{ backgroundColor: v.color?.hexcode || "var(--muted)" }}
             />
           ))}
@@ -749,7 +766,15 @@ function CheckoutPage({ user, onNavigate }) {
                 <p>Tạm tính <span>{formatVND(total)}</span></p>
                 <p>Phí vận chuyển <span className="free">Miễn phí</span></p>
                 {discountData && (
-                  <p>Giảm giá ({discountData.code}) <span className="free">-{formatVND(discountData.discountAmount)}</span></p>
+                  <p>
+                    Giảm giá ({discountData.code})
+                    {discountData.discountType === 'PERCENTAGE' ? (
+                      <span style={{ display: "inline-block", marginLeft: "0.5rem", padding: "0.2rem 0.5rem", backgroundColor: "#28a745", color: "white", borderRadius: "4px", fontSize: "0.85rem", fontWeight: "bold" }}>%</span>
+                    ) : (
+                      <span style={{ display: "inline-block", marginLeft: "0.5rem", padding: "0.2rem 0.5rem", backgroundColor: "#fd7e14", color: "white", borderRadius: "4px", fontSize: "0.85rem", fontWeight: "bold" }}>đ</span>
+                    )}
+                    <span className="free">-{formatVND(discountData.discountAmount)}</span>
+                  </p>
                 )}
                 <p className="total-row">Tổng cộng <span>{formatVND(Math.max(0, total - Number(discountData?.discountAmount || 0)))}</span></p>
               </div>
@@ -862,6 +887,7 @@ function OrdersPage({ user, onNavigate }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [showTracking, setShowTracking] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -898,78 +924,102 @@ function OrdersPage({ user, onNavigate }) {
   };
 
   return (
-    <section className="panel layout-2">
-      <article className="card">
-        <h3>📋 Lịch sử đơn hàng</h3>
-        {loading && <Spinner />}
-        {orders.length === 0 && !loading && (
-          <div className="empty-cart">
-            <div style={{ fontSize: "3rem" }}>📦</div>
-            <p>Chưa có đơn hàng nào</p>
-            <button className="btn-main" type="button" onClick={() => onNavigate("catalog")}>
-              Mua sắm ngay
-            </button>
-          </div>
-        )}
-        <div className="orders-list">
-          {orders.map((order) => (
-            <div
-              key={order.id}
-              className={`order-row ${selected?.id === order.id ? "selected" : ""}`}
-              onClick={() => setSelected(order)}
-            >
-              <div className="order-row-left">
-                <strong>Đơn #{order.id}</strong>
-                <span className="order-date">
-                  {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
-                </span>
+    <>
+      <section className="panel layout-2">
+        <article className="card">
+          <h3>📋 Lịch sử đơn hàng</h3>
+          {loading && <Spinner />}
+          {orders.length === 0 && !loading && (
+            <div className="empty-cart">
+              <div style={{ fontSize: "3rem" }}>📦</div>
+              <p>Chưa có đơn hàng nào</p>
+              <button className="btn-main" type="button" onClick={() => onNavigate("catalog")}>
+                Mua sắm ngay
+              </button>
+            </div>
+          )}
+          <div className="orders-list">
+            {orders.map((order) => (
+              <div
+                key={order.id}
+                className={`order-row ${selected?.id === order.id ? "selected" : ""}`}
+                onClick={() => setSelected(order)}
+              >
+                <div className="order-row-left">
+                  <strong>Đơn #{order.id}</strong>
+                  <span className="order-date">
+                    {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
+                  </span>
+                </div>
+                <div className="order-row-right">
+                  <span className="order-total">{formatVND(order.totalAmount || 0)}</span>
+                  <span
+                    className="status-badge"
+                    style={{ background: statusColor[order.status] || "#6b7280" }}
+                  >
+                    {order.status}
+                  </span>
+                </div>
               </div>
-              <div className="order-row-right">
-                <span className="order-total">{formatVND(order.totalAmount || 0)}</span>
-                <span
-                  className="status-badge"
-                  style={{ background: statusColor[order.status] || "#6b7280" }}
-                >
-                  {order.status}
+            ))}
+          </div>
+        </article>
+
+        <article className="card">
+          <h3>Chi tiết đơn hàng</h3>
+          {selected ? (
+            <div className="order-detail">
+              <p><strong>Mã đơn:</strong> #{selected.id}</p>
+              <p><strong>Trạng thái:</strong>{" "}
+                <span className="status-badge" style={{ background: statusColor[selected.status] }}>
+                  {selected.status}
                 </span>
+              </p>
+              <p><strong>Tổng tiền:</strong> {formatVND(selected.totalAmount || 0)}</p>
+              <p><strong>Thanh toán:</strong> {selected.paymentMethod}</p>
+              {selected.receiverName && <p><strong>Người nhận:</strong> {selected.receiverName}</p>}
+              {selected.receiverPhone && <p><strong>Điện thoại:</strong> {selected.receiverPhone}</p>}
+              {selected.shippingAddress && <p><strong>Địa chỉ:</strong> {selected.shippingAddress}</p>}
+              {selected.momoTransId && <p><strong>Mã GD MoMo:</strong> {selected.momoTransId}</p>}
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-main"
+                  onClick={() => setShowTracking(true)}
+                >
+                  🚚 Theo dõi đơn
+                </button>
+                {selected.status === "PENDING" && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ color: "#ef4444", borderColor: "#ef4444" }}
+                    onClick={() => cancelOrder(selected.id)}
+                  >
+                    Hủy đơn hàng
+                  </button>
+                )}
               </div>
             </div>
-          ))}
-        </div>
-      </article>
+          ) : (
+            <div className="notice">Chọn một đơn hàng để xem chi tiết</div>
+          )}
+        </article>
+      </section>
 
-      <article className="card">
-        <h3>Chi tiết đơn hàng</h3>
-        {selected ? (
-          <div className="order-detail">
-            <p><strong>Mã đơn:</strong> #{selected.id}</p>
-            <p><strong>Trạng thái:</strong>{" "}
-              <span className="status-badge" style={{ background: statusColor[selected.status] }}>
-                {selected.status}
-              </span>
-            </p>
-            <p><strong>Tổng tiền:</strong> {formatVND(selected.totalAmount || 0)}</p>
-            <p><strong>Thanh toán:</strong> {selected.paymentMethod}</p>
-            {selected.receiverName && <p><strong>Người nhận:</strong> {selected.receiverName}</p>}
-            {selected.receiverPhone && <p><strong>Điện thoại:</strong> {selected.receiverPhone}</p>}
-            {selected.shippingAddress && <p><strong>Địa chỉ:</strong> {selected.shippingAddress}</p>}
-            {selected.momoTransId && <p><strong>Mã GD MoMo:</strong> {selected.momoTransId}</p>}
-            {selected.status === "PENDING" && (
-              <button
-                type="button"
-                className="ghost"
-                style={{ marginTop: "1rem", color: "#ef4444", borderColor: "#ef4444" }}
-                onClick={() => cancelOrder(selected.id)}
-              >
-                Hủy đơn hàng
-              </button>
-            )}
+      {/* Order Tracking Modal */}
+      {showTracking && selected && (
+        <div className="modal-backdrop" onClick={() => setShowTracking(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3>🚚 Theo dõi đơn hàng</h3>
+            <OrderTrackingDisplay orderId={selected.id} />
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.5rem" }}>
+              <button type="button" className="ghost" onClick={() => setShowTracking(false)}>Đóng</button>
+            </div>
           </div>
-        ) : (
-          <div className="notice">Chọn một đơn hàng để xem chi tiết</div>
-        )}
-      </article>
-    </section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -988,6 +1038,7 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   const [activeSection, setActiveSection] = useState("profile"); // profile | orders | vouchers
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [coupons, setCoupons] = useState([]);
 
   // Profile Edit
@@ -1011,7 +1062,10 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   }, [user]);
 
   useEffect(() => {
-    if (!user || activeSection !== "orders") return;
+    if (!user || activeSection !== "orders") {
+      setSelectedOrderId(null);
+      return;
+    }
     setOrdersLoading(true);
     api
       .get(`/api/orders/user/${user.id}`)
@@ -1234,44 +1288,54 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
           )}
 
           {activeSection === "orders" && (
-            <>
-              <h3>📦 Đơn hàng của tôi</h3>
-              <p className="account-section-desc">
-                Xem nhanh các đơn đã đặt và trạng thái thanh toán.
-              </p>
-              {ordersLoading && <Spinner />}
-              {!ordersLoading && orders.length === 0 && (
-                <div className="empty-cart">
-                  <div style={{ fontSize: "3rem" }}>📭</div>
-                  <p>Chưa có đơn hàng nào.</p>
+            selectedOrderId ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 style={{ margin: 0 }}>Quản lý đơn hàng #{selectedOrderId}</h3>
+                  <button type="button" className="ghost small" onClick={() => setSelectedOrderId(null)}>Quay lại danh sách</button>
                 </div>
-              )}
-              <div className="orders-list">
-                {orders.map((order) => (
-                  <div key={order.id} className="order-row">
-                    <div className="order-row-left">
-                      <strong>Đơn #{order.id}</strong>
-                      <span className="order-date">
-                        {order.createdAt
-                          ? new Date(order.createdAt).toLocaleDateString("vi-VN")
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="order-row-right">
-                      <span className="order-total">
-                        {formatVND(order.totalAmount || 0)}
-                      </span>
-                      <span
-                        className="status-badge"
-                        style={{ background: statusColor[order.status] || "#6b7280" }}
-                      >
-                        {order.status}
-                      </span>
-                    </div>
+                <OrderTrackingDisplay orderId={selectedOrderId} />
+              </>
+            ) : (
+              <>
+                <h3>📦 Đơn hàng của tôi</h3>
+                <p className="account-section-desc">
+                  Xem nhanh các đơn đã đặt và trạng thái thanh toán.
+                </p>
+                {ordersLoading && <Spinner />}
+                {!ordersLoading && orders.length === 0 && (
+                  <div className="empty-cart">
+                    <div style={{ fontSize: "3rem" }}>📭</div>
+                    <p>Chưa có đơn hàng nào.</p>
                   </div>
-                ))}
-              </div>
-            </>
+                )}
+                <div className="orders-list">
+                  {orders.map((order) => (
+                    <div key={order.id} className="order-row" style={{ cursor: "pointer" }} onClick={() => setSelectedOrderId(order.id)}>
+                      <div className="order-row-left">
+                        <strong>Đơn #{order.id}</strong>
+                        <span className="order-date">
+                          {order.createdAt
+                            ? new Date(order.createdAt).toLocaleDateString("vi-VN")
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="order-row-right">
+                        <span className="order-total">
+                          {formatVND(order.totalAmount || 0)}
+                        </span>
+                        <span
+                          className="status-badge"
+                          style={{ background: statusColor[order.status] || "#6b7280" }}
+                        >
+                          {order.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
           )}
 
           {activeSection === "vouchers" && (
@@ -1374,15 +1438,18 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
 // ─── AdminPage ────────────────────────────────────────────────────────────────
 function AdminPage({ onToast }) {
   const modules = [
-    { key: "products", label: "Sản phẩm", endpoint: "/api/admin/products" },
-    { key: "categories", label: "Danh mục", endpoint: "/api/admin/categories" },
-    { key: "variants", label: "Biến thể", endpoint: "/api/admin/product-variants" },
-    { key: "users", label: "Người dùng", endpoint: "/api/admin/users" },
-    { key: "orders", label: "Đơn hàng", endpoint: "/api/orders" },
-    { key: "coupons", label: "Mã giảm giá", endpoint: "/api/coupons" }
+    { key: "products", label: "🛍️ Sản phẩm", endpoint: "/api/admin/products" },
+    { key: "categories", label: "📂 Danh mục", endpoint: "/api/admin/categories" },
+    { key: "variants", label: "📦 Biến thể", endpoint: "/api/admin/product-variants" },
+    { key: "users", label: "👥 Người dùng", endpoint: "/api/admin/users" },
+    { key: "orders", label: "🛒 Đơn hàng", endpoint: "/api/orders" },
+    { key: "coupons", label: "🎟️ Mã giảm giá", endpoint: "/api/coupons" },
+    { key: "revenue-stats", label: "📊 Doanh thu", endpoint: "/api/admin/revenue-stats" },
+    { key: "reviews", label: "⭐ Đánh giá", endpoint: "/api/reviews" }
   ];
   const [activeModule, setActiveModule] = useState("products");
   const [items, setItems] = useState([]);
+  const [revenueStatsLoading, setRevenueStatsLoading] = useState(false);
   const [couponForm, setCouponForm] = useState({
     code: "",
     discountType: "FIXED",
@@ -1503,6 +1570,9 @@ function AdminPage({ onToast }) {
   const isOrdersModule = activeModule === "orders";
   const isVariantModule = activeModule === "variants";
   const isCouponModule = activeModule === "coupons";
+  const isRevenueStatsModule = activeModule === "revenue-stats";
+  const isReviewsModule = activeModule === "reviews";
+  const [period, setPeriod] = useState("month");
 
   const stockByProductId = allVariants.reduce((acc, variant) => {
     const pid = variant.product?.id;
@@ -1849,63 +1919,78 @@ function AdminPage({ onToast }) {
         </nav>
       </aside>
 
-      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
+      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: isRevenueStatsModule || isReviewsModule ? "1fr" : "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
         <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           <h3 style={{ marginBottom: "1rem" }}>{currentModule?.label}</h3>
-          {isProductModule && (
-            <div className="admin-stock-filter">
-              <button
-                type="button"
-                className={stockFilter === "all" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("all")}
-              >
-                Tất cả
-              </button>
-              <button
-                type="button"
-                className={stockFilter === "in" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("in")}
-              >
-                Còn hàng
-              </button>
-              <button
-                type="button"
-                className={stockFilter === "out" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("out")}
-              >
-                Hết hàng
-              </button>
+          {isRevenueStatsModule ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <button type="button" className={period === "day" ? "chip light selected" : "chip light"} onClick={() => setPeriod("day")}>Hôm nay</button>
+                <button type="button" className={period === "week" ? "chip light selected" : "chip light"} onClick={() => setPeriod("week")}>Tuần này</button>
+                <button type="button" className={period === "month" ? "chip light selected" : "chip light"} onClick={() => setPeriod("month")}>Tháng này</button>
+              </div>
+              <RevenueStatsDisplay period={period} onPeriodChange={setPeriod} />
             </div>
+          ) : isReviewsModule ? (
+            <ReviewsManagementDisplay />
+          ) : (
+            <>
+              {isProductModule && (
+                <div className="admin-stock-filter">
+                  <button
+                    type="button"
+                    className={stockFilter === "all" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("all")}
+                  >
+                    Tất cả
+                  </button>
+                  <button
+                    type="button"
+                    className={stockFilter === "in" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("in")}
+                  >
+                    Còn hàng
+                  </button>
+                  <button
+                    type="button"
+                    className={stockFilter === "out" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("out")}
+                  >
+                    Hết hàng
+                  </button>
+                </div>
+              )}
+              <div className="notice">
+                Module: <strong>{currentModule?.label}</strong>.
+                {loading ? " Đang tải..." : ` Tổng ${filteredItems.length} mục.`}
+              </div>
+              {actionMessage && <div className="notice error">{actionMessage}</div>}
+              <div className="admin-list">
+                {filteredItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={selectedId === item.id ? "admin-row selected" : "admin-row"}
+                    onClick={() => setSelectedId(item.id)}
+                  >
+                    <strong>#{item.id.slice(-6)}</strong>
+                    <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {item.name || item.username || item.email || item.code || item.status || "(no title)"}
+                    </span>
+                    {isVariantModule && <span style={{ flexShrink: 0 }}>SKU: {item.sku || "—"}</span>}
+                    {isVariantModule && <span className="stock-tag in" style={{ flexShrink: 0 }}>Kho: {item.stock ?? 0}</span>}
+                    {isProductModule && (
+                      <span className={(stockByProductId[item.id] || 0) > 0 ? "stock-tag in" : "stock-tag out"} style={{ flexShrink: 0 }}>
+                        {(stockByProductId[item.id] || 0) > 0 ? "Còn hàng" : "Hết hàng"}
+                      </span>
+                    )}
+                    {item.totalAmount && <span style={{ flexShrink: 0 }}>{formatVND(item.totalAmount)}</span>}
+                  </button>
+                ))}
+                {filteredItems.length === 0 && !loading && <p className="notice">Không có dữ liệu.</p>}
+              </div>
+            </>
           )}
-          <div className="notice">
-            Module: <strong>{currentModule?.label}</strong>.
-            {loading ? " Đang tải..." : ` Tổng ${filteredItems.length} mục.`}
-          </div>
-          {actionMessage && <div className="notice error">{actionMessage}</div>}
-          <div className="admin-list">
-            {filteredItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={selectedId === item.id ? "admin-row selected" : "admin-row"}
-                onClick={() => setSelectedId(item.id)}
-              >
-                <strong>#{item.id.slice(-6)}</strong>
-                <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {item.name || item.username || item.email || item.code || item.status || "(no title)"}
-                </span>
-                {isVariantModule && <span style={{ flexShrink: 0 }}>SKU: {item.sku || "—"}</span>}
-                {isVariantModule && <span className="stock-tag in" style={{ flexShrink: 0 }}>Kho: {item.stock ?? 0}</span>}
-                {isProductModule && (
-                  <span className={(stockByProductId[item.id] || 0) > 0 ? "stock-tag in" : "stock-tag out"} style={{ flexShrink: 0 }}>
-                    {(stockByProductId[item.id] || 0) > 0 ? "Còn hàng" : "Hết hàng"}
-                  </span>
-                )}
-                {item.totalAmount && <span style={{ flexShrink: 0 }}>{formatVND(item.totalAmount)}</span>}
-              </button>
-            ))}
-            {filteredItems.length === 0 && !loading && <p className="notice">Không có dữ liệu.</p>}
-          </div>
         </div>
         <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           {isCouponModule ? (
@@ -2259,18 +2344,76 @@ function AdminPage({ onToast }) {
               </div>
             </>
           ) : isOrdersModule ? (
-            <>
-              <h3>📊 Thống kê đơn hàng</h3>
-              <div className="notice">
-                Tổng đơn hàng: <strong>{items.length}</strong>
+            selectedId ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3>Quản lý đơn hàng #{selectedId}</h3>
+                  <button type="button" className="ghost small" onClick={() => setSelectedId(null)}>Quay lại</button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "1rem", background: "none", border: "1px solid var(--border)", borderRadius: "8px" }}>
+                  <label style={{ fontWeight: 600, margin: 0 }}>Cập nhật trạng thái:</label>
+                  <select
+                    value={items.find(i => i.id === selectedId)?.status || ""}
+                    onChange={async (e) => {
+                      const newStatus = e.target.value;
+                      if (!confirm("Xác nhận đổi trạng thái đơn hàng?")) return;
+                      try {
+                        await api.put(`/api/admin/orders/${selectedId}/status`, { status: newStatus });
+                        onToast("Cập nhật trạng thái thành công!", "success");
+                        loadItems();
+                        setSelectedId(null);
+                      } catch (err) {
+                        onToast("Lỗi: " + err.message, "error");
+                      }
+                    }}
+                    style={{ flex: 1, padding: "0.5rem" }}
+                  >
+                    <option value="PENDING">PENDING (Chờ xử lý)</option>
+                    <option value="CONFIRMED">CONFIRMED (Đã xác nhận)</option>
+                    <option value="PAID">PAID (Đã thanh toán)</option>
+                    <option value="SHIPPING">SHIPPING (Đang giao hàng)</option>
+                    <option value="DELIVERED">DELIVERED (Giao thành công)</option>
+                    <option value="COMPLETED">COMPLETED (Hoàn tất)</option>
+                    <option value="CANCELLED">CANCELLED (Đã hủy)</option>
+                    <option value="FAILED">FAILED (Thanh toán lỗi)</option>
+                  </select>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "1rem", background: "none", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "1rem" }}>
+                  <label style={{ fontWeight: 600, margin: 0, minWidth: "140px" }}>Ngày dự kiến giao:</label>
+                  <input
+                    type="date"
+                    className="admin-input-date"
+                    value={items.find(i => i.id === selectedId)?.expectedDeliveryDate ? items.find(i => i.id === selectedId).expectedDeliveryDate.substring(0, 10) : ""}
+                    onChange={async (e) => {
+                      const dt = e.target.value;
+                      if (!confirm("Xác nhận cập nhật ngày dự kiến giao?")) return;
+                      try {
+                        await api.put(`/api/admin/orders/${selectedId}/status`, { expectedDeliveryDate: dt || null });
+                        onToast("Cập nhật ngày giao thành công!", "success");
+                        loadItems();
+                      } catch (err) {
+                        onToast("Lỗi: " + err.message, "error");
+                      }
+                    }}
+                    style={{ flex: 1, padding: "0.5rem" }}
+                  />
+                </div>
+                <OrderTrackingDisplay orderId={selectedId} />
               </div>
-              <div className="notice">
-                Đã thanh toán: <strong>{items.filter((i) => i.status === "PAID").length}</strong>
-              </div>
-              <div className="notice">
-                Đang chờ: <strong>{items.filter((i) => i.status === "PENDING").length}</strong>
-              </div>
-            </>
+            ) : (
+              <>
+                <h3>📊 Thống kê đơn hàng</h3>
+                <div className="notice">
+                  Tổng đơn hàng: <strong>{items.length}</strong>
+                </div>
+                <div className="notice">
+                  Đã thanh toán: <strong>{items.filter((i) => i.status === "PAID" || i.status === "COMPLETED").length}</strong>
+                </div>
+                <div className="notice">
+                  Đang chờ: <strong>{items.filter((i) => i.status === "PENDING" || i.status === "CONFIRMED").length}</strong>
+                </div>
+              </>
+            )
           ) : (
             <>
               <h3>📊 Thống kê nhanh</h3>
@@ -2325,15 +2468,288 @@ function Footer() {
   );
 }
 
-function ProductDetailModal({ detail, onClose }) {
+// ─── RevenueStatsDisplay ──────────────────────────────────────────────────────
+function RevenueStatsDisplay({ period, onPeriodChange }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get(`/api/admin/revenue-stats?period=${period}`)
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setLoading(false));
+  }, [period]);
+
+  if (loading) return <Spinner />;
+  if (!stats) return <div className="notice error">Không thể tải dữ liệu</div>;
+
+  const maxRevenue = Math.max(
+    stats.revenueByMethod?.COD || 0,
+    stats.revenueByMethod?.MOMO || 0,
+    1
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem" }}>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.5rem" }}>💰 Tổng doanh thu</div>
+          <div style={{ fontSize: "1.5rem", fontWeight: "700", color: "var(--accent2)" }}>{formatVND(stats.totalRevenue)}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.3rem" }}>{stats.ordersCount} đơn hàng</div>
+        </div>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.5rem" }}>✅ Thành công</div>
+          <div style={{ fontSize: "1.5rem", fontWeight: "700", color: "var(--green)" }}>{stats.orderByStatus?.PAID || 0}</div>
+        </div>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.5rem" }}>⏳ Chờ xác nhận</div>
+          <div style={{ fontSize: "1.5rem", fontWeight: "700", color: "var(--yellow)" }}>{stats.orderByStatus?.PENDING || 0}</div>
+        </div>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.5rem" }}>❌ Thất bại/Hủy</div>
+          <div style={{ fontSize: "1.5rem", fontWeight: "700", color: "var(--red)" }}>{(stats.orderByStatus?.FAILED || 0) + (stats.orderByStatus?.CANCELLED || 0)}</div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1.5rem" }}>
+          <h4 style={{ marginBottom: "1rem" }}>💳 Doanh thu theo phương thức</h4>
+          <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end", height: "120px" }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ height: maxRevenue > 0 ? `${(stats.revenueByMethod?.COD || 0) / maxRevenue * 100}%` : "0", width: "100%", background: "linear-gradient(180deg, #fbbf24, #f59e0b)", borderRadius: "4px 4px 0 0", minHeight: "10px" }} />
+              <div style={{ fontSize: "0.75rem", marginTop: "0.5rem", textAlign: "center" }}>
+                <div style={{ fontWeight: "700" }}>COD</div>
+                <div style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{formatVND(stats.revenueByMethod?.COD || 0)}</div>
+              </div>
+            </div>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ height: maxRevenue > 0 ? `${(stats.revenueByMethod?.MOMO || 0) / maxRevenue * 100}%` : "0", width: "100%", background: "linear-gradient(180deg, #ae2070, #d63384)", borderRadius: "4px 4px 0 0", minHeight: "10px" }} />
+              <div style={{ fontSize: "0.75rem", marginTop: "0.5rem", textAlign: "center" }}>
+                <div style={{ fontWeight: "700" }}>MoMo</div>
+                <div style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{formatVND(stats.revenueByMethod?.MOMO || 0)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="card" style={{ background: "var(--surface2)", padding: "1.5rem" }}>
+          <h4 style={{ marginBottom: "1rem" }}>🏆 Sản phẩm bán chạy</h4>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>{stats.topProducts?.slice(0, 5).map((p, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", paddingBottom: "0.5rem", borderBottom: "1px solid var(--border)" }}><span>{i + 1}. {p.productName}</span><span style={{ color: "var(--accent2)", fontWeight: "700" }}>×{p.totalQuantity}</span></div>))}{(!stats.topProducts || stats.topProducts.length === 0) && (<div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>Chưa có dữ liệu</div>)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ReviewsManagementDisplay  ────────────────────────────────────────────────
+function ReviewsManagementDisplay() {
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [filterCat, setFilterCat] = useState("ALL");
+
+  useEffect(() => { loadReviews(); }, []);
+
+  const loadReviews = async () => {
+    setLoading(true);
+    try {
+      const allReviews = await api.get("/api/reviews");
+      setReviews(Array.isArray(allReviews) ? allReviews : []);
+    } catch (err) { setReviews([]); }
+    finally { setLoading(false); }
+  };
+
+  const categories = Array.from(new Set(
+    reviews.map(r => r.product?.category?.id || "unknown")
+  )).map(id => {
+    const rev = reviews.find(r => r.product?.category?.id === id);
+    return { id, name: rev?.product?.category?.name || "Khác" };
+  });
+
+  const filteredReviews = filterCat === "ALL"
+    ? reviews
+    : reviews.filter(r => (r.product?.category?.id || "unknown") === filterCat);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h4 style={{ margin: 0 }}>Lọc đánh giá</h4>
+        <select
+          value={filterCat}
+          onChange={(e) => setFilterCat(e.target.value)}
+          style={{ width: "200px", padding: "0.5rem", borderRadius: "8px", border: "1px solid var(--border)" }}
+        >
+          <option value="ALL">Tất cả danh mục</option>
+          {categories.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {loading ? <Spinner /> : filteredReviews.length === 0 ? (
+        <div className="notice">Chưa có đánh giá nào cho danh mục này</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {filteredReviews.map((r) => (
+            <div key={r.id} className="card" style={{ background: "var(--surface2)", padding: "1rem", fontSize: "0.9rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <div style={{ fontWeight: "600" }}>{r.user?.fullName || r.user?.username || "Ẩn danh"}</div>
+                <div style={{ color: "#fbbf24" }}>{'⭐'.repeat(r.rating)}</div>
+              </div>
+              <div style={{ color: "var(--text-light)", fontSize: "0.85rem", marginBottom: "0.5rem", display: "flex", justifyContent: "space-between" }}>
+                <span>Sản phẩm: <strong>{r.product?.name || "N/A"}</strong></span>
+                <span>Danh mục: <strong style={{ color: "var(--primary)" }}>{r.product?.category?.name || "Khác"}</strong></span>
+              </div>
+              <div style={{ color: "var(--text)" }}>{r.comment || "(Không có bình luận)"}</div>
+              <div style={{ color: "var(--muted)", fontSize: "0.75rem", marginTop: "0.5rem" }}>{new Date(r.createdAt).toLocaleDateString("vi-VN")}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── OrderTrackingDisplay  ────────────────────────────────────────────────────
+function OrderTrackingDisplay({ orderId }) {
+  const [trackData, setTrackData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!orderId) return;
+    setLoading(true);
+    api.get(`/api/orders/${orderId}/track`).then(setTrackData).catch(() => setTrackData(null)).finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) return <Spinner />;
+  if (!trackData) return <div className="notice error">Không tìm thấy đơn hàng</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", borderBottom: "1px solid var(--border)", paddingBottom: "1rem" }}>
+        <div><div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Mã đơn hàng</div><div style={{ fontSize: "1.1rem", fontWeight: "700" }}>#{trackData.orderId}</div></div>
+        <div><div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Trạng thái hiện tại</div><div style={{ fontSize: "1rem", fontWeight: "700", color: "var(--accent2)" }}>{trackData.status === "PAID" ? "✅ Đã thanh toán" : trackData.status === "PENDING" ? "⏳ Chờ xác nhận" : trackData.status === "FAILED" ? "❌ Thất bại" : trackData.status}</div></div>
+        {trackData.expectedDeliveryDate && (
+          <div style={{ gridColumn: "1 / -1", background: "var(--surface2)", padding: "0.75rem", borderRadius: "8px" }}>
+            <div style={{ fontSize: "0.85rem", color: "var(--green)" }}>🚀 Dự kiến giao hàng trước ngày</div>
+            <div style={{ fontSize: "1rem", fontWeight: "600", color: "var(--green)" }}>
+              {new Date(trackData.expectedDeliveryDate).toLocaleDateString("vi-VN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ position: "relative", paddingLeft: "3rem", marginBottom: "1.5rem" }}>{trackData.timeline?.map((step, idx) => (<div key={idx} style={{ marginBottom: "2rem", position: "relative" }}><div style={{ position: "absolute", left: "-1.9rem", top: "0.3rem", width: "1.2rem", height: "1.2rem", borderRadius: "50%", background: step.completed ? "var(--green)" : "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.6rem", color: step.completed ? "#fff" : "transparent" }}>{step.completed ? "✓" : ""}</div>{idx < trackData.timeline.length - 1 && (<div style={{ position: "absolute", left: "-1.2rem", top: "1.3rem", width: "2px", height: "1.7rem", background: step.completed ? "var(--green)" : "var(--border)" }} />)}<div><div style={{ fontWeight: "700", fontSize: "0.95rem" }}>{step.label}</div>{step.timestamp && (<div style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.2rem" }}>{new Date(step.timestamp).toLocaleString("vi-VN")}</div>)}</div></div>))}</div>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
+        <h4 style={{ marginBottom: "1rem" }}>Chi tiết sản phẩm</h4>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {trackData.items?.map((item) => (
+            <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9rem" }}>
+              <div>
+                <strong>{item.productVariant?.product?.name || "Sản phẩm không xác định"}</strong>
+                <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: "0.2rem" }}>
+                  {item.productVariant?.color?.name || "N/A"} / {item.productVariant?.size?.name || "N/A"} x {item.quantity}
+                </div>
+              </div>
+              <div style={{ fontWeight: "600" }}>{formatVND((item.price || 0) * (item.quantity || 1))}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ borderTop: "1px dashed var(--border)", marginTop: "1rem", paddingTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Tổng tiền hàng:</span>
+            <strong>{formatVND(trackData.totalAmount)}</strong>
+          </div>
+          {trackData.discountAmount > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--green)" }}>
+              <span>Giảm giá ({trackData.couponCode || "Voucher"}):</span>
+              <strong>-{formatVND(trackData.discountAmount)}</strong>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "1.1rem", marginTop: "0.2rem" }}>
+            <strong>Thành tiền:</strong>
+            <strong style={{ color: "var(--accent2)" }}>{formatVND(trackData.finalAmount)}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductDetailModal({ detail, onClose, user }) {
   if (!detail) return null;
   const { product, variants } = detail;
   const totalStock = (variants || []).reduce((sum, v) => sum + Number(v.stock || 0), 0);
   const price = variants?.[0]?.price;
 
+  const [reviews, setReviews] = useState([]);
+  const [avgRating, setAvgRating] = useState(0);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState({ text: "", type: "" });
+
+  useEffect(() => {
+    if (!product?.id) return;
+    setReviewsLoading(true);
+    api.get(`/api/reviews/product/${product.id}`)
+      .then((data) => {
+        setReviews(data.reviews || []);
+        setAvgRating(data.averageRating || 0);
+        setTotalReviews(data.totalReviews || 0);
+      })
+      .catch(() => {
+        setReviews([]);
+        setAvgRating(0);
+        setTotalReviews(0);
+      })
+      .finally(() => setReviewsLoading(false));
+  }, [product?.id]);
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      setReviewMessage({ text: "Vui lòng đăng nhập để đánh giá", type: "error" });
+      return;
+    }
+    if (!rating) {
+      setReviewMessage({ text: "Vui lòng chọn số sao", type: "error" });
+      return;
+    }
+
+    setSubmittingReview(true);
+    try {
+      const res = await api.post("/api/reviews", {
+        userId: user.id,
+        productId: product.id,
+        rating: Number(rating),
+        comment: comment.trim()
+      });
+
+      if (res.error) {
+        setReviewMessage({ text: res.error, type: "error" });
+      } else {
+        setReviewMessage({ text: "Đánh giá thành công! Cảm ơn bạn.", type: "success" });
+        setRating(5);
+        setComment("");
+        setShowReviewForm(false);
+        // Reload reviews
+        const data = await api.get(`/api/reviews/product/${product.id}`);
+        setReviews(data.reviews || []);
+        setAvgRating(data.averageRating || 0);
+        setTotalReviews(data.totalReviews || 0);
+      }
+    } catch (err) {
+      setReviewMessage({ text: "Lỗi: " + err.message, type: "error" });
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "90vh", overflowY: "auto" }}>
         <h3>{product?.name || "Chi tiết sản phẩm"}</h3>
         <div className="notice">
           Trạng thái:{" "}
@@ -2352,7 +2768,110 @@ function ProductDetailModal({ detail, onClose }) {
           <p>Tổng tồn kho <span>{totalStock}</span></p>
           <p>Số biến thể <span>{variants?.length || 0}</span></p>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+
+        {/* Reviews Section */}
+        <div style={{ marginTop: "1.5rem", borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
+          <h4 style={{ marginBottom: "1rem" }}>⭐ Đánh giá ({totalReviews})</h4>
+
+          {reviewsLoading ? (
+            <Spinner />
+          ) : (
+            <>
+              {totalReviews > 0 && (
+                <div style={{ marginBottom: "1rem", padding: "0.75rem", backgroundColor: "var(--surface2)", borderRadius: "var(--radius)" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: "700", color: "var(--accent2)" }}>
+                    {avgRating} <span style={{ fontSize: "1rem", color: "var(--muted)" }}>/ 5 sao</span>
+                  </div>
+                </div>
+              )}
+
+              {totalReviews === 0 && !showReviewForm && (
+                <div className="notice" style={{ marginBottom: "1rem" }}>Chưa có đánh giá nào</div>
+              )}
+
+              {showReviewForm ? (
+                <form onSubmit={handleSubmitReview} style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "var(--surface2)", borderRadius: "var(--radius)" }}>
+                  <h5 style={{ marginBottom: "0.5rem" }}>Thêm đánh giá của bạn</h5>
+
+                  {reviewMessage.text && (
+                    <div className={`notice ${reviewMessage.type}`} style={{ marginBottom: "0.75rem" }}>
+                      {reviewMessage.text}
+                    </div>
+                  )}
+
+                  <div style={{ marginBottom: "1rem" }}>
+                    <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "600" }}>Số sao *</label>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setRating(star)}
+                          style={{
+                            fontSize: "1.5rem",
+                            cursor: "pointer",
+                            opacity: star <= rating ? 1 : 0.3,
+                            transition: "opacity 0.2s"
+                          }}
+                        >
+                          ⭐
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label style={{ display: "block", marginBottom: "0.75rem" }}>
+                    Bình luận (tuỳ chọn)
+                    <textarea
+                      rows="3"
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder="Chia sẻ trải nghiệm của bạn..."
+                      style={{ marginTop: "0.25rem", width: "100%" }}
+                    />
+                  </label>
+
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button type="submit" className="btn-main" disabled={submittingReview} style={{ flex: 1 }}>
+                      {submittingReview ? "Đang gửi..." : "Gửi đánh giá"}
+                    </button>
+                    <button type="button" className="ghost" onClick={() => setShowReviewForm(false)} disabled={submittingReview}>
+                      Hủy
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowReviewForm(true)}
+                  style={{ marginBottom: "1rem", width: "100%" }}
+                >
+                  ✏️ Viết đánh giá
+                </button>
+              )}
+
+              {reviews.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  {reviews.map((r) => (
+                    <div key={r.id} style={{ padding: "0.75rem", backgroundColor: "var(--surface2)", borderRadius: "var(--radius)", fontSize: "0.9rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", alignItems: "center" }}>
+                        <strong>{r.user?.fullName || "Ẩn danh"}</strong>
+                        <span style={{ color: "#fbbf24" }}>{'⭐'.repeat(r.rating)}</span>
+                      </div>
+                      {r.comment && <p style={{ margin: "0.25rem 0", color: "var(--text)" }}>{r.comment}</p>}
+                      <div style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.25rem" }}>
+                        {new Date(r.createdAt).toLocaleDateString("vi-VN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.5rem" }}>
           <button type="button" className="ghost" onClick={onClose}>Đóng</button>
         </div>
       </div>
@@ -2365,6 +2884,8 @@ function App() {
   const [activePage, setActivePage] = useState(() => {
     // If redirected from MoMo, show payment result
     if (window.location.pathname === "/payment-result") return "payment-result";
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("orderId") && params.get("resultCode") !== null) return "payment-result";
     return "home";
   });
 
@@ -2540,7 +3061,7 @@ function App() {
         onClose={() => setToast({ message: "", type: "" })}
       />
 
-      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} />
+      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} user={user} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "crypto";
 import Product from "../models/product.model.js";
 import ProductVariant from "../models/productVariant.model.js";
 import Category from "../models/category.model.js";
@@ -11,6 +12,7 @@ import OrderItem from "../models/orderItem.model.js";
 import User from "../models/user.model.js";
 import Coupon from "../models/coupon.model.js";
 import Role from "../models/role.model.js";
+import Review from "../models/review.model.js";
 
 const router = Router();
 
@@ -306,9 +308,15 @@ router.delete("/coupons/:id", async (req, res, next) => {
     } catch (e) { next(e); }
 });
 
-// ── MOMO (stub) ──────────────────────────────────────────────────────────────
+// ── MOMO (Real API Integration) ───────────────────────────────────────────────
 
-// POST /api/momo/create-payment
+// Helper: Generate MoMo signature
+const generateMoMoSignature = (data, secretKey) => {
+    const rawSignature = `accessKey=${data.accessKey}&amount=${data.amount}&extraData=${data.extraData}&ipnUrl=${data.ipnUrl}&orderId=${data.orderId}&orderInfo=${data.orderInfo}&partnerCode=${data.partnerCode}&redirectUrl=${data.redirectUrl}&requestId=${data.requestId}&requestType=${data.requestType}`;
+    return crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
+};
+
+// POST /api/momo/create-payment - Call real MoMo API
 router.post("/momo/create-payment", async (req, res, next) => {
     try {
         const { userId, receiverName, receiverPhone, shippingAddress, note, couponCode } = req.body;
@@ -345,7 +353,12 @@ router.post("/momo/create-payment", async (req, res, next) => {
             couponCode: finalCouponCode,
             paymentMethod: "MOMO",
             status: "PENDING",
-            momoOrderId: `MOMO_${Date.now()}`
+            momoOrderId: `MOMO_${Date.now()}`,
+            statusHistory: [{
+                status: "PENDING",
+                changedAt: new Date(),
+                note: "Đơn hàng được tạo"
+            }]
         });
 
         await Promise.all(items.map(item =>
@@ -357,35 +370,112 @@ router.post("/momo/create-payment", async (req, res, next) => {
             })
         ));
 
-        // In sandbox mode we just simulate a successful payment
-        // Real MoMo integration would redirect to payUrl
-        const momoOrderId = order.momoOrderId;
+        // Call Real MoMo API
+        const partnerCode = process.env.MOMO_PARTNER_CODE || "MOMO";
+        const accessKey = process.env.MOMO_ACCESS_KEY || "F8BBA842ECF85";
+        const secretKey = process.env.MOMO_SECRET_KEY || "K951B6PE1waDMi640xX08PD3vg6EkVlz";
+        const redirectUrl = process.env.MOMO_REDIRECT_URL || "http://127.0.0.1:5173/payment-result";
+        const ipnUrl = process.env.MOMO_IPN_URL || "http://127.0.0.1:3000/api/momo/ipn";
 
-        // Simulate MoMo - return a fake payUrl for demo
-        const payUrl = `http://127.0.0.1:5173/payment-result?orderId=${momoOrderId}&resultCode=0&transId=TEST${Date.now()}&message=Success`;
+        const requestId = `${order._id}_${Date.now()}`;
+        const orderId = order.momoOrderId;
+        const amount = String(Math.round(finalAmount));
+        const orderInfo = `Thanh toán đơn hàng ${orderId}`;
+        const requestType = "captureWallet";
+        const extraData = Buffer.from(JSON.stringify({ orderId: order._id })).toString('base64');
 
-        res.json({
-            orderId: order._id,
-            momoOrderId,
-            payUrl,
-            message: "Tạo thanh toán MoMo thành công (sandbox)"
+        const signatureData = {
+            accessKey,
+            amount,
+            extraData,
+            ipnUrl,
+            orderId,
+            orderInfo,
+            partnerCode,
+            redirectUrl,
+            requestId,
+            requestType
+        };
+
+        const signature = generateMoMoSignature(signatureData, secretKey);
+
+        // Call MoMo test API
+        const momoUrl = "https://test-payment.momo.vn/v2/gateway/api/create";
+        const payload = {
+            partnerCode,
+            partnerName: "Store API",
+            partnerUserID: String(userId),
+            accessKey,
+            requestId,
+            amount,
+            orderId,
+            orderInfo,
+            redirectUrl,
+            ipnUrl,
+            requestType,
+            signature,
+            extraData,
+            lang: "vi"
+        };
+
+        const momoResponse = await fetch(momoUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
         });
+
+        const momoData = await momoResponse.json();
+
+        if (momoData.resultCode === 0 && momoData.payUrl) {
+            // Save momo requestId for later verification
+            order.momoOrderId = orderId;
+            await order.save();
+
+            res.json({
+                orderId: order._id,
+                momoOrderId: orderId,
+                payUrl: momoData.payUrl,
+                message: "Tạo thanh toán MoMo thành công"
+            });
+        } else {
+            order.status = "FAILED";
+            order.statusHistory.push({
+                status: "FAILED",
+                changedAt: new Date(),
+                note: `MoMo error: ${momoData.message}`
+            });
+            await order.save();
+
+            res.status(400).json({
+                error: momoData.message || "Không thể tạo thanh toán MoMo",
+                resultCode: momoData.resultCode
+            });
+        }
     } catch (e) { next(e); }
 });
 
-// GET /api/momo/result
-router.get("/momo/result", async (req, res, next) => {
+// POST /api/momo/ipn - IPN webhook from MoMo
+router.post("/momo/ipn", async (req, res, next) => {
     try {
-        const { orderId, resultCode, transId } = req.query;
+        const { orderId, resultCode, transId, extraData } = req.body;
 
         // Find order by momoOrderId
         const order = await Order.findOne({ momoOrderId: orderId });
         if (!order) return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
 
+        if (order.status === "PAID" || order.status === "FAILED") {
+            return res.json({ message: "Đơn hàng đã được xử lý", status: order.status, resultCode: 0 });
+        }
+
         if (resultCode === "0" || resultCode === 0) {
             // Payment success
             order.status = "PAID";
             order.momoTransId = transId || "";
+            order.statusHistory.push({
+                status: "PAID",
+                changedAt: new Date(),
+                note: `Thanh toán thành công - MoMo TransID: ${transId}`
+            });
             await order.save();
 
             // Clear cart
@@ -406,6 +496,11 @@ router.get("/momo/result", async (req, res, next) => {
             });
         } else {
             order.status = "FAILED";
+            order.statusHistory.push({
+                status: "FAILED",
+                changedAt: new Date(),
+                note: `Thanh toán thất bại - Code: ${resultCode}`
+            });
             await order.save();
             res.json({
                 dbOrderId: order._id,
@@ -415,6 +510,336 @@ router.get("/momo/result", async (req, res, next) => {
                 status: "FAILED"
             });
         }
+    } catch (e) { next(e); }
+});
+
+// GET /api/momo/result - Redirect after MoMo payment
+router.get("/momo/result", async (req, res, next) => {
+    try {
+        const { orderId, resultCode, transId } = req.query;
+
+        // Find order by momoOrderId
+        const order = await Order.findOne({ momoOrderId: orderId });
+        if (!order) return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
+
+        if (order.status === "PAID" || order.status === "FAILED") {
+            return res.json({
+                dbOrderId: order._id,
+                resultCode: 0,
+                transId: order.momoTransId,
+                message: "Thanh toán đã được ghi nhận trước đó",
+                status: order.status
+            });
+        }
+
+        if (resultCode === "0" || resultCode === 0) {
+            // Payment success
+            order.status = "PAID";
+            order.momoTransId = transId || "";
+            order.statusHistory.push({
+                status: "PAID",
+                changedAt: new Date(),
+                note: `Thanh toán thành công - MoMo TransID: ${transId}`
+            });
+            await order.save();
+
+            // Clear cart
+            const cart = await Cart.findOne({ user: order.user });
+            if (cart) await CartItem.deleteMany({ cart: cart._id });
+
+            // Update coupon usedCount
+            if (order.couponCode) {
+                await Coupon.findOneAndUpdate({ code: order.couponCode }, { $inc: { usedCount: 1 } });
+            }
+
+            res.json({
+                dbOrderId: order._id,
+                resultCode: 0,
+                transId: order.momoTransId,
+                message: "Thanh toán thành công",
+                status: "PAID"
+            });
+        } else {
+            order.status = "FAILED";
+            order.statusHistory.push({
+                status: "FAILED",
+                changedAt: new Date(),
+                note: `Thanh toán thất bại - Code: ${resultCode}`
+            });
+            await order.save();
+            res.json({
+                dbOrderId: order._id,
+                resultCode: Number(resultCode),
+                transId,
+                message: "Thanh toán thất bại",
+                status: "FAILED"
+            });
+        }
+    } catch (e) { next(e); }
+});
+
+// ── REVIEWS ──────────────────────────────────────────────────────────────────
+
+// POST /api/reviews - Submit a review
+router.post("/reviews", async (req, res, next) => {
+    try {
+        const { userId, productId, rating, comment } = req.body;
+
+        // Validate rating
+        if (rating < 1 || rating > 5) {
+            return res.status(400).json({ error: "Rating phải từ 1 đến 5" });
+        }
+
+        // Check if user has purchased this product
+        const orders = await Order.find({ user: userId, status: "PAID" });
+        const orderIds = orders.map(o => o._id);
+
+        const hasPurchased = await OrderItem.findOne({
+            order: { $in: orderIds },
+            productVariant: { $in: await ProductVariant.find({ product: productId }).distinct('_id') }
+        });
+
+        if (!hasPurchased) {
+            return res.status(403).json({ error: "Bạn phải mua sản phẩm này để đánh giá" });
+        }
+
+        // Check if user has already reviewed this product
+        const existingReview = await Review.findOne({ user: userId, product: productId });
+        if (existingReview) {
+            return res.status(400).json({ error: "Bạn đã đánh giá sản phẩm này rồi" });
+        }
+
+        const review = await Review.create({
+            user: userId,
+            product: productId,
+            rating: Number(rating),
+            comment: comment || ""
+        });
+
+        const populated = await Review.findById(review._id).populate("user", "fullName avatarUrl").populate("product", "name");
+        res.status(201).json(fmt(populated));
+    } catch (e) { next(e); }
+});
+
+// GET /api/reviews/product/:productId - Get reviews for a product
+router.get("/reviews/product/:productId", async (req, res, next) => {
+    try {
+        const reviews = await Review.find({ product: req.params.productId })
+            .populate("user", "fullName avatarUrl")
+            .sort({ createdAt: -1 });
+
+        const avgRating = reviews.length > 0
+            ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
+            : 0;
+
+        res.json({
+            reviews: fmtAll(reviews),
+            averageRating: avgRating,
+            totalReviews: reviews.length
+        });
+    } catch (e) { next(e); }
+});
+
+// GET /api/reviews - All reviews (admin)
+router.get("/reviews", async (req, res, next) => {
+    try {
+        const reviews = await Review.find()
+            .populate("user", "fullName avatarUrl email username")
+            .populate({
+                path: "product",
+                select: "name category",
+                populate: { path: "category", select: "name" }
+            })
+            .sort({ createdAt: -1 });
+        res.json(fmtAll(reviews));
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/reviews/:id - Delete a review (admin)
+router.delete("/reviews/:id", async (req, res, next) => {
+    try {
+        await Review.findByIdAndDelete(req.params.id);
+        res.json({ message: "Đã xóa đánh giá" });
+    } catch (e) { next(e); }
+});
+
+// ── ORDER TRACKING ───────────────────────────────────────────────────────────
+
+// GET /api/orders/:id/track - Get order tracking timeline
+router.get("/orders/:id/track", async (req, res, next) => {
+    try {
+        const order = await Order.findById(req.params.id)
+            .populate("user", "fullName email phone")
+            .populate({
+                path: "user",
+                select: "fullName email phone"
+            });
+
+        if (!order) return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
+
+        const timeline = [
+            {
+                step: 1,
+                label: "Đặt hàng",
+                timestamp: order.createdAt,
+                completed: !!order.createdAt
+            },
+            {
+                step: 2,
+                label: "Xác nhận",
+                timestamp: order.statusHistory.find(h => h.status === "CONFIRMED")?.changedAt || null,
+                completed: ["CONFIRMED", "PAID", "SHIPPING", "DELIVERED"].includes(order.status)
+            },
+            {
+                step: 3,
+                label: "Thanh toán",
+                timestamp: order.statusHistory.find(h => h.status === "PAID")?.changedAt || null,
+                completed: ["PAID", "SHIPPING", "DELIVERED"].includes(order.status)
+            },
+            {
+                step: 4,
+                label: "Đang giao",
+                timestamp: order.statusHistory.find(h => h.status === "SHIPPING")?.changedAt || null,
+                completed: ["SHIPPING", "DELIVERED"].includes(order.status)
+            },
+            {
+                step: 5,
+                label: "Hoàn thành",
+                timestamp: order.statusHistory.find(h => h.status === "DELIVERED")?.changedAt || null,
+                completed: order.status === "DELIVERED"
+            }
+        ];
+
+        const items = await OrderItem.find({ order: order._id })
+            .populate({
+                path: "productVariant",
+                populate: [
+                    { path: "product" },
+                    { path: "color" },
+                    { path: "size" }
+                ]
+            });
+
+        res.json({
+            orderId: order._id,
+            momoOrderId: order.momoOrderId,
+            status: order.status,
+            totalAmount: order.totalAmount,
+            finalAmount: order.finalAmount,
+            discountAmount: order.discountAmount,
+            receiverName: order.receiverName,
+            receiverPhone: order.receiverPhone,
+            shippingAddress: order.shippingAddress,
+            paymentMethod: order.paymentMethod,
+            expectedDeliveryDate: order.expectedDeliveryDate,
+            timeline,
+            statusHistory: order.statusHistory,
+            items: fmtAll(items),
+            createdAt: order.createdAt,
+            updatedAt: order.updatedAt
+        });
+    } catch (e) { next(e); }
+});
+
+// ── ADMIN DASHBOARD ──────────────────────────────────────────────────────────
+
+// GET /api/admin/revenue-stats - Revenue analytics
+router.get("/admin/revenue-stats", async (req, res, next) => {
+    try {
+        const { period = "month" } = req.query; // month, week, day
+
+        let startDate = new Date();
+        if (period === "day") {
+            startDate.setHours(0, 0, 0, 0);
+        } else if (period === "week") {
+            const day = startDate.getDay();
+            startDate.setDate(startDate.getDate() - day);
+            startDate.setHours(0, 0, 0, 0);
+        } else {
+            startDate.setDate(1);
+            startDate.setHours(0, 0, 0, 0);
+        }
+
+        // Total revenue
+        const orders = await Order.find({
+            status: { $in: ["PAID", "SHIPPING", "DELIVERED", "COMPLETED"] },
+            createdAt: { $gte: startDate }
+        });
+        const totalRevenue = orders.reduce((sum, o) => sum + o.finalAmount, 0);
+
+        // Orders by status
+        const allOrders = await Order.find();
+        const orderByStatus = {
+            PAID: allOrders.filter(o => ["PAID", "SHIPPING", "DELIVERED", "COMPLETED"].includes(o.status)).length,
+            PENDING: allOrders.filter(o => ["PENDING", "CONFIRMED"].includes(o.status)).length,
+            CANCELLED: allOrders.filter(o => o.status === "CANCELLED").length,
+            FAILED: allOrders.filter(o => o.status === "FAILED").length
+        };
+
+        // Top products
+        const topProducts = await OrderItem.aggregate([
+            {
+                $match: {
+                    order: { $in: orders.map(o => o._id) }
+                }
+            },
+            {
+                $group: {
+                    _id: "$productVariant",
+                    totalQuantity: { $sum: "$quantity" },
+                    totalRevenue: { $sum: { $multiply: ["$price", "$quantity"] } }
+                }
+            },
+            {
+                $sort: { totalQuantity: -1 }
+            },
+            {
+                $limit: 5
+            },
+            {
+                $lookup: {
+                    from: "productvariants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "variant"
+                }
+            },
+            {
+                $lookup: {
+                    from: "products",
+                    localField: "variant.product",
+                    foreignField: "_id",
+                    as: "product"
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    variantId: "$_id",
+                    productName: { $arrayElemAt: ["$product.name", 0] },
+                    totalQuantity: 1,
+                    totalRevenue: 1
+                }
+            }
+        ]);
+
+        // Revenue by payment method
+        const revenueByMethod = {
+            COD: orders.filter(o => o.paymentMethod === "COD").reduce((sum, o) => sum + o.finalAmount, 0),
+            MOMO: orders.filter(o => o.paymentMethod === "MOMO").reduce((sum, o) => sum + o.finalAmount, 0)
+        };
+
+        res.json({
+            period,
+            totalRevenue,
+            orderByStatus,
+            topProducts: topProducts.map(p => ({
+                ...p,
+                variantId: String(p.variantId)
+            })),
+            revenueByMethod,
+            ordersCount: orders.length
+        });
     } catch (e) { next(e); }
 });
 
@@ -628,12 +1053,16 @@ router.post("/admin/users", async (req, res, next) => {
 // PUT /api/admin/users/:id
 router.put("/admin/users/:id", async (req, res, next) => {
     try {
-        const { username, email, fullName, phone, role } = req.body;
+        const { username, email, fullName, phone, role, password } = req.body;
         const roleCode = role?.code || "USER";
         const roleDoc = await Role.findOne({ code: roleCode });
 
         const updateData = { username: username?.toLowerCase(), email: email?.toLowerCase(), fullName, phone };
         if (roleDoc) updateData.role = roleDoc._id;
+
+        if (password) {
+            updateData.password = await require("bcryptjs").hash(password, 10);
+        }
 
         const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true }).populate("role");
         if (!user) return res.status(404).json({ error: "Không tìm thấy user" });
@@ -651,6 +1080,37 @@ router.delete("/admin/users/:id", async (req, res, next) => {
     try {
         await User.findByIdAndDelete(req.params.id);
         res.json({ message: "Đã xóa người dùng" });
+    } catch (e) { next(e); }
+});
+
+// PUT /api/admin/orders/:id/status - Update order status
+router.put("/admin/orders/:id/status", async (req, res, next) => {
+    try {
+        const { status, expectedDeliveryDate } = req.body;
+        if (status && !["PENDING", "CONFIRMED", "PAID", "SHIPPING", "DELIVERED", "COMPLETED", "CANCELLED", "FAILED"].includes(status)) {
+            return res.status(400).json({ error: "Trạng thái không hợp lệ" });
+        }
+        const order = await Order.findById(req.params.id);
+        if (!order) return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
+
+        if (status && order.status !== status) {
+            order.status = status;
+            order.statusHistory.push({ status, changedAt: new Date() });
+        }
+        if (expectedDeliveryDate !== undefined) {
+            order.expectedDeliveryDate = expectedDeliveryDate;
+        }
+
+        await order.save();
+        res.json(fmt(order));
+    } catch (e) { next(e); }
+});
+
+// GET /api/admin/coupons
+router.get("/admin/coupons", async (req, res, next) => {
+    try {
+        const coupons = await Coupon.find().sort({ createdAt: -1 });
+        res.json(fmtAll(coupons));
     } catch (e) { next(e); }
 });
 

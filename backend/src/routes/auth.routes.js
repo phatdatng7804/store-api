@@ -4,6 +4,17 @@ import { registerSchema, loginSchema, refreshTokenSchema } from "../validations/
 import { limiter } from "../middlewares/rateLimit.middleware.js";
 import authenticate from "../middlewares/auth.middleware.js";
 
+// Validation middleware
+const validate = (schema) => (req, res, next) => {
+    const { error, value } = schema.validate(req.body, { abortEarly: false });
+    if (error) {
+        const messages = error.details.map(d => d.message).join(", ");
+        return res.status(400).json({ error: messages });
+    }
+    req.validatedData = value;
+    next();
+};
+
 const router = Router();
 
 // POST /api/auth/register
@@ -17,9 +28,5 @@ router.post("/refresh-token", limiter, validate(refreshTokenSchema), authControl
 
 // POST /api/auth/logout
 router.post("/logout", authenticate, authController.logout);
-router.post("/register", authController.register);
-
-// POST /api/auth/login
-router.post("/login", authController.login);
 
 export default router;
