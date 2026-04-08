@@ -1794,9 +1794,9 @@ function AdminPage({ onToast }) {
         return;
       }
       const payload = {
-        product: { id: Number(variantForm.productId) },
-        color: { id: Number(variantForm.colorId) },
-        size: { id: Number(variantForm.sizeId) },
+        product: { id: variantForm.productId },
+        color: { id: variantForm.colorId },
+        size: { id: variantForm.sizeId },
         name: variantForm.name.trim(),
         price,
         stock,
@@ -1861,7 +1861,7 @@ function AdminPage({ onToast }) {
             name: form.name.trim(),
             description: form.description.trim(),
             imageUrl: form.imageUrl.trim(),
-            category: { id: Number(form.categoryId) }
+            category: { id: form.categoryId }
           }
           : { name: form.name.trim() };
     }
@@ -2117,13 +2117,14 @@ function AdminPage({ onToast }) {
                 </div>
                 <div className="admin-form-grid">
                   <label>
-                    Giá *
+                    Giá (VND) *
                     <input
                       type="number"
-                      min="1"
-                      step="1000"
+                      min="1000"
+                      step="1"
                       value={variantForm.price}
                       onChange={(e) => setVariantForm((p) => ({ ...p, price: e.target.value }))}
+                      placeholder="Ví dụ: 299000"
                       required
                     />
                   </label>
@@ -2134,6 +2135,7 @@ function AdminPage({ onToast }) {
                       min="0"
                       value={variantForm.stock}
                       onChange={(e) => setVariantForm((p) => ({ ...p, stock: e.target.value }))}
+                      placeholder="Ví dụ: 50"
                       required
                     />
                   </label>

@@ -882,8 +882,17 @@ router.get("/admin/products", async (req, res, next) => {
 router.post("/admin/products", async (req, res, next) => {
     try {
         const { name, description, imageUrl, category } = req.body;
-        const categoryId = category?.id || category;
-        const product = await Product.create({ name, description, imageUrl, category: categoryId || null });
+        const createData = { name, description, imageUrl };
+        
+        // Only add category if it has a valid ID
+        if (category) {
+            const categoryId = typeof category === 'string' ? category : category?.id;
+            if (categoryId && categoryId !== 'null') {
+                createData.category = categoryId;
+            }
+        }
+        
+        const product = await Product.create(createData);
         const populated = await Product.findById(product._id).populate("category");
         res.status(201).json(fmt(populated));
     } catch (e) { next(e); }
@@ -893,10 +902,21 @@ router.post("/admin/products", async (req, res, next) => {
 router.put("/admin/products/:id", async (req, res, next) => {
     try {
         const { name, description, imageUrl, category } = req.body;
-        const categoryId = category?.id || category;
+        const updateData = { name, description, imageUrl };
+        
+        // Only update category if it has a valid ID
+        if (category) {
+            const categoryId = typeof category === 'string' ? category : category?.id;
+            if (categoryId && categoryId !== 'null') {
+                updateData.category = categoryId;
+            } else {
+                updateData.category = null;
+            }
+        }
+        
         const product = await Product.findByIdAndUpdate(
             req.params.id,
-            { name, description, imageUrl, category: categoryId || null },
+            updateData,
             { new: true, runValidators: true }
         ).populate("category");
         if (!product) return res.status(404).json({ error: "Không tìm thấy sản phẩm" });
@@ -907,7 +927,7 @@ router.put("/admin/products/:id", async (req, res, next) => {
 // DELETE /api/admin/products/:id
 router.delete("/admin/products/:id", async (req, res, next) => {
     try {
-        await Product.findByIdAndUpdate(req.params.id, { isDeleted: true });
+        await Product.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
         res.json({ message: "Đã xóa sản phẩm" });
     } catch (e) { next(e); }
 });
@@ -915,7 +935,7 @@ router.delete("/admin/products/:id", async (req, res, next) => {
 // GET /api/admin/categories
 router.get("/admin/categories", async (req, res, next) => {
     try {
-        const categories = await Category.find().sort({ name: 1 });
+        const categories = await Category.find({ isDeleted: false }).sort({ name: 1 });
         res.json(fmtAll(categories));
     } catch (e) { next(e); }
 });
@@ -940,7 +960,7 @@ router.put("/admin/categories/:id", async (req, res, next) => {
 // DELETE /api/admin/categories/:id
 router.delete("/admin/categories/:id", async (req, res, next) => {
     try {
-        await Category.findByIdAndDelete(req.params.id);
+        await Category.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
         res.json({ message: "Đã xóa danh mục" });
     } catch (e) { next(e); }
 });
@@ -960,14 +980,28 @@ router.get("/admin/product-variants", async (req, res, next) => {
 router.post("/admin/product-variants", async (req, res, next) => {
     try {
         const { product, color, size, name, sku, price, stock } = req.body;
-        const variant = await ProductVariant.create({
-            product: product?.id || product,
-            color: color?.id || color,
-            size: size?.id || size,
+        
+        const getValue = (val) => {
+            if (!val) return null;
+            const id = typeof val === 'string' ? val : val?.id;
+            return (id && id !== 'null') ? id : null;
+        };
+        
+        const createData = {
             name, sku,
             price: Number(price),
             stock: Number(stock || 0)
-        });
+        };
+        
+        const productId = getValue(product);
+        const colorId = getValue(color);
+        const sizeId = getValue(size);
+        
+        if (productId) createData.product = productId;
+        if (colorId) createData.color = colorId;
+        if (sizeId) createData.size = sizeId;
+        
+        const variant = await ProductVariant.create(createData);
         const populated = await ProductVariant.findById(variant._id)
             .populate({ path: "product", populate: { path: "category" } })
             .populate("color").populate("size");
@@ -979,16 +1013,30 @@ router.post("/admin/product-variants", async (req, res, next) => {
 router.put("/admin/product-variants/:id", async (req, res, next) => {
     try {
         const { product, color, size, name, sku, price, stock } = req.body;
+        
+        const getValue = (val) => {
+            if (!val) return null;
+            const id = typeof val === 'string' ? val : val?.id;
+            return (id && id !== 'null') ? id : null;
+        };
+        
+        const updateData = {
+            name, sku,
+            price: Number(price),
+            stock: Number(stock || 0)
+        };
+        
+        const productId = getValue(product);
+        const colorId = getValue(color);
+        const sizeId = getValue(size);
+        
+        if (productId) updateData.product = productId;
+        if (colorId) updateData.color = colorId;
+        if (sizeId) updateData.size = sizeId;
+        
         const variant = await ProductVariant.findByIdAndUpdate(
             req.params.id,
-            {
-                product: product?.id || product,
-                color: color?.id || color,
-                size: size?.id || size,
-                name, sku,
-                price: Number(price),
-                stock: Number(stock || 0)
-            },
+            updateData,
             { new: true, runValidators: true }
         ).populate({ path: "product", populate: { path: "category" } }).populate("color").populate("size");
         if (!variant) return res.status(404).json({ error: "Không tìm thấy biến thể" });
@@ -999,7 +1047,7 @@ router.put("/admin/product-variants/:id", async (req, res, next) => {
 // DELETE /api/admin/product-variants/:id
 router.delete("/admin/product-variants/:id", async (req, res, next) => {
     try {
-        await ProductVariant.findByIdAndDelete(req.params.id);
+        await ProductVariant.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
         res.json({ message: "Đã xóa biến thể" });
     } catch (e) { next(e); }
 });
@@ -1117,16 +1165,78 @@ router.get("/admin/coupons", async (req, res, next) => {
 // GET /api/admin/colors
 router.get("/admin/colors", async (req, res, next) => {
     try {
-        const colors = await Color.find().sort({ name: 1 });
+        const colors = await Color.find({ isDeleted: false }).sort({ name: 1 });
         res.json(fmtAll(colors));
+    } catch (e) { next(e); }
+});
+
+// POST /api/admin/colors
+router.post("/admin/colors", async (req, res, next) => {
+    try {
+        const { name, hexcode } = req.body;
+        const color = await Color.create({ name, hexcode });
+        res.status(201).json(fmt(color));
+    } catch (e) { next(e); }
+});
+
+// PUT /api/admin/colors/:id
+router.put("/admin/colors/:id", async (req, res, next) => {
+    try {
+        const { name, hexcode } = req.body;
+        const color = await Color.findByIdAndUpdate(
+            req.params.id,
+            { name, hexcode },
+            { new: true, runValidators: true }
+        );
+        if (!color) return res.status(404).json({ error: "Không tìm thấy màu" });
+        res.json(fmt(color));
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/admin/colors/:id
+router.delete("/admin/colors/:id", async (req, res, next) => {
+    try {
+        await Color.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+        res.json({ message: "Đã xóa màu" });
     } catch (e) { next(e); }
 });
 
 // GET /api/admin/sizes
 router.get("/admin/sizes", async (req, res, next) => {
     try {
-        const sizes = await Size.find().sort({ name: 1 });
+        const sizes = await Size.find({ isDeleted: false }).sort({ name: 1 });
         res.json(fmtAll(sizes));
+    } catch (e) { next(e); }
+});
+
+// POST /api/admin/sizes
+router.post("/admin/sizes", async (req, res, next) => {
+    try {
+        const { name } = req.body;
+        const size = await Size.create({ name });
+        res.status(201).json(fmt(size));
+    } catch (e) { next(e); }
+});
+
+// PUT /api/admin/sizes/:id
+router.put("/admin/sizes/:id", async (req, res, next) => {
+    try {
+        const { name } = req.body;
+        const size = await Size.findByIdAndUpdate(
+            req.params.id,
+            { name },
+            { new: true, runValidators: true }
+        );
+        if (!size) return res.status(404).json({ error: "Không tìm thấy kích cỡ" });
+        res.json(fmt(size));
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/admin/sizes/:id
+router.delete("/admin/sizes/:id", async (req, res, next) => {
+    try {
+        await Size.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+        res.json({ message: "Đã xóa kích cỡ" });
     } catch (e) { next(e); }
 });
 
