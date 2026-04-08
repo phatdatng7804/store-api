@@ -28,7 +28,11 @@ const productSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+<<<<<<< HEAD
     deletedAt: {
+=======
+    deletedAt:{
+>>>>>>> bf292fd2b335bd508bcdba3d65c5f66857686a09
         type: Date,
         default: null
     }
