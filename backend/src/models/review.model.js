@@ -1,24 +1,47 @@
 import mongoose from "mongoose";
 
 const reviewSchema = new mongoose.Schema({
-    user:{
+    user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        required: true
     },
-    product:{
+    product: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Product",
+        required: true
     },
-    rating:{
+    rating: {
         type: Number,
         required: true,
         min: 1,
         max: 5
     },
-    comment:{
+    title: {
         type: String,
-        trim: true
+        trim: true,
+        maxlength: 100
+    },
+    comment: {
+        type: String,
+        trim: true,
+        maxlength: 1000
+    },
+    isVerifiedPurchase: {
+        type: Boolean,
+        default: false
+    },
+    helpfulCount: {
+        type: Number,
+        default: 0
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
     }
-}, {timestamps: true})
+}, { timestamps: true });
+
+// Mỗi user chỉ được review 1 lần trên mỗi sản phẩm
+reviewSchema.index({ user: 1, product: 1 }, { unique: true });
 
 export default mongoose.model("Review", reviewSchema);

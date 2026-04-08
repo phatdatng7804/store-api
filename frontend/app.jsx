@@ -4,6 +4,7 @@ const { useEffect, useState, useCallback } = React;
 const pages = [
   { key: "home", label: "🏠 Home" },
   { key: "catalog", label: "Catalog" },
+  { key: "contact", label: "📞 Liên Hệ" },
   { key: "admin", label: "⚙️ Admin", adminOnly: true }
 ];
 
@@ -127,9 +128,9 @@ function ProductCard({ product, variants, onAddToCart, user, onNavigate, onViewD
         </div>
         <div className="swatches">
           {variants && variants.slice(0, 3).map((v) => (
-            <span 
-              key={v.id} 
-              title={v.color?.name || ""} 
+            <span
+              key={v.id}
+              title={v.color?.name || ""}
               style={{ backgroundColor: v.color?.hexcode || "var(--muted)" }}
             />
           ))}
@@ -2325,40 +2326,288 @@ function Footer() {
   );
 }
 
-function ProductDetailModal({ detail, onClose }) {
+// ─── StarRating ───────────────────────────────────────────────────────────────
+function StarRating({ value, onChange, readonly = false, size = "1.2rem" }) {
+  const [hovered, setHovered] = useState(0);
+  const display = hovered || value;
+  return (
+    <span style={{ display: "inline-flex", gap: "2px" }}>
+      {[1, 2, 3, 4, 5].map(star => (
+        <span
+          key={star}
+          style={{ fontSize: size, cursor: readonly ? "default" : "pointer", color: display >= star ? "#f59e0b" : "#374151", transition: "color 0.1s" }}
+          onClick={() => !readonly && onChange?.(star)}
+          onMouseEnter={() => !readonly && setHovered(star)}
+          onMouseLeave={() => !readonly && setHovered(0)}
+        >★</span>
+      ))}
+    </span>
+  );
+}
+
+// ─── ProductDetailModal ───────────────────────────────────────────────────────
+function ProductDetailModal({ detail, onClose, user }) {
+  const [tab, setTab] = useState("info"); // info | reviews
+  const [reviewData, setReviewData] = useState(null);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [form, setForm] = useState({ rating: 0, title: "", comment: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState({ text: "", type: "" });
+  const [helpfulVoted, setHelpfulVoted] = useState({});
+
   if (!detail) return null;
   const { product, variants } = detail;
   const totalStock = (variants || []).reduce((sum, v) => sum + Number(v.stock || 0), 0);
   const price = variants?.[0]?.price;
 
+  const loadReviews = async () => {
+    if (!product?.id) return;
+    setLoadingReviews(true);
+    try {
+      const data = await api.get(`/api/reviews/product/${product.id}`);
+      setReviewData(data);
+    } catch (e) {
+      setReviewData({ reviews: [], stats: { total: 0, avgRating: 0, distribution: [] } });
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
+
+  const handleTabChange = (t) => {
+    setTab(t);
+    if (t === "reviews" && !reviewData) loadReviews();
+  };
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    if (!user) { setSubmitMsg({ text: "Vui lòng đăng nhập để đánh giá!", type: "error" }); return; }
+    if (!form.rating) { setSubmitMsg({ text: "Vui lòng chọn số sao!", type: "error" }); return; }
+    setSubmitting(true);
+    setSubmitMsg({ text: "", type: "" });
+    try {
+      await api.post("/api/reviews", {
+        userId: user.id,
+        productId: product.id,
+        rating: form.rating,
+        title: form.title,
+        comment: form.comment
+      });
+      setSubmitMsg({ text: "Cảm ơn bạn đã đánh giá! 🎉", type: "success" });
+      setForm({ rating: 0, title: "", comment: "" });
+      await loadReviews();
+    } catch (err) {
+      setSubmitMsg({ text: err.message || "Đã xảy ra lỗi", type: "error" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleHelpful = async (reviewId) => {
+    if (helpfulVoted[reviewId]) return;
+    try {
+      const res = await api.patch(`/api/reviews/${reviewId}/helpful`, {});
+      setHelpfulVoted(prev => ({ ...prev, [reviewId]: true }));
+      setReviewData(prev => ({
+        ...prev,
+        reviews: prev.reviews.map(r => r.id === reviewId ? { ...r, helpfulCount: res.helpfulCount } : r)
+      }));
+    } catch (e) {}
+  };
+
+  const stats = reviewData?.stats;
+  const reviews = reviewData?.reviews || [];
+  const alreadyReviewed = user && reviews.some(r => r.user?.id === user.id);
+
+  const tabBtn = (key, label) => (
+    <button
+      type="button"
+      onClick={() => handleTabChange(key)}
+      style={{ padding: "0.5rem 1.2rem", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, background: tab === key ? "#7c3aed" : "transparent", color: tab === key ? "#fff" : "#94a3b8", transition: "all 0.2s" }}
+    >{label}</button>
+  );
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <h3>{product?.name || "Chi tiết sản phẩm"}</h3>
-        <div className="notice">
-          Trạng thái:{" "}
-          <span className={totalStock > 0 ? "stock-tag in" : "stock-tag out"}>
-            {totalStock > 0 ? "Còn hàng" : "Hết hàng"}
-          </span>
+      <div className="modal-card" style={{ maxWidth: "680px", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
+          <h3 style={{ margin: 0, color: "#e2e8f0", fontSize: "1.2rem" }}>{product?.name || "Chi tiết sản phẩm"}</h3>
+          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}>✕</button>
         </div>
-        <img
-          src={product?.imageUrl || "https://placehold.co/600x400/png?text=Product"}
-          alt={product?.name || "Product"}
-          style={{ width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "10px" }}
-        />
-        <p style={{ color: "#94a3b8" }}>{product?.description || "Chưa có mô tả sản phẩm."}</p>
-        <div className="summary-list">
-          <p>Giá tham khảo <span>{price ? formatVND(price) : "—"}</span></p>
-          <p>Tổng tồn kho <span>{totalStock}</span></p>
-          <p>Số biến thể <span>{variants?.length || 0}</span></p>
+
+        {/* Tab switcher */}
+        <div style={{ display: "flex", gap: "0.4rem", background: "#0f0f1a", borderRadius: "10px", padding: "4px", marginBottom: "1.2rem" }}>
+          {tabBtn("info", "📋 Thông tin")}
+          {tabBtn("reviews", `⭐ Đánh giá${stats ? ` (${stats.total})` : ""}`)}
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="ghost" onClick={onClose}>Đóng</button>
-        </div>
+
+        {/* TAB: Info */}
+        {tab === "info" && (
+          <>
+            <div className="notice" style={{ marginBottom: "0.8rem" }}>
+              Trạng thái:{" "}
+              <span className={totalStock > 0 ? "stock-tag in" : "stock-tag out"}>
+                {totalStock > 0 ? "Còn hàng" : "Hết hàng"}
+              </span>
+            </div>
+            <img
+              src={product?.imageUrl || "https://placehold.co/600x400/png?text=Product"}
+              alt={product?.name || "Product"}
+              style={{ width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "10px", marginBottom: "1rem" }}
+            />
+            <p style={{ color: "#94a3b8", marginBottom: "1rem" }}>{product?.description || "Chưa có mô tả sản phẩm."}</p>
+            <div className="summary-list">
+              <p>Giá tham khảo <span>{price ? formatVND(price) : "—"}</span></p>
+              <p>Tổng tồn kho <span>{totalStock}</span></p>
+              <p>Số biến thể <span>{variants?.length || 0}</span></p>
+            </div>
+            {/* Variants table */}
+            {variants && variants.length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <h4 style={{ color: "#a78bfa", fontSize: "0.85rem", marginBottom: "0.6rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Biến thể sản phẩm</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "auto auto auto auto", gap: "6px", fontSize: "0.82rem", color: "#94a3b8" }}>
+                  {["Màu", "Size", "Giá", "Tồn kho"].map(h => (
+                    <div key={h} style={{ color: "#e2e8f0", fontWeight: 600 }}>{h}</div>
+                  ))}
+                  {variants.map(v => (
+                    <React.Fragment key={v.id}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        {v.color?.hexcode && <span style={{ width: "12px", height: "12px", borderRadius: "50%", background: v.color.hexcode, display: "inline-block", border: "1px solid #444" }} />}
+                        {v.color?.name || "—"}
+                      </div>
+                      <div>{v.size?.name || "—"}</div>
+                      <div style={{ color: "#a78bfa" }}>{v.price ? formatVND(v.price) : "—"}</div>
+                      <div style={{ color: Number(v.stock) > 0 ? "#10b981" : "#ef4444" }}>{v.stock ?? 0}</div>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.5rem" }}>
+              <button type="button" className="ghost" onClick={onClose}>Đóng</button>
+              <button type="button" className="btn-main" onClick={() => handleTabChange("reviews")}>Xem đánh giá ⭐</button>
+            </div>
+          </>
+        )}
+
+        {/* TAB: Reviews */}
+        {tab === "reviews" && (
+          <div>
+            {loadingReviews && <div style={{ textAlign: "center", padding: "2rem" }}><Spinner /></div>}
+
+            {!loadingReviews && stats && (
+              <>
+                {/* Stats Overview */}
+                <div style={{ background: "#0f0f1a", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.2rem", display: "flex", gap: "1.5rem", alignItems: "center" }}>
+                  <div style={{ textAlign: "center", minWidth: "80px" }}>
+                    <div style={{ fontSize: "2.5rem", fontWeight: 700, color: "#f59e0b" }}>{stats.avgRating || 0}</div>
+                    <StarRating value={Math.round(stats.avgRating)} readonly size="1rem" />
+                    <div style={{ color: "#6b7280", fontSize: "0.78rem", marginTop: "4px" }}>{stats.total} đánh giá</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {(stats.distribution || []).map(d => (
+                      <div key={d.star} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                        <span style={{ color: "#94a3b8", fontSize: "0.78rem", minWidth: "16px" }}>{d.star}</span>
+                        <span style={{ color: "#f59e0b", fontSize: "0.7rem" }}>★</span>
+                        <div style={{ flex: 1, height: "6px", background: "#1a1a2e", borderRadius: "999px", overflow: "hidden" }}>
+                          <div style={{ height: "100%", background: "#f59e0b", borderRadius: "999px", width: stats.total > 0 ? `${(d.count / stats.total) * 100}%` : "0%" }} />
+                        </div>
+                        <span style={{ color: "#6b7280", fontSize: "0.75rem", minWidth: "20px" }}>{d.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Review Form */}
+                {user && !alreadyReviewed && (
+                  <div style={{ background: "#0f0f1a", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.2rem" }}>
+                    <h4 style={{ color: "#e2e8f0", margin: "0 0 1rem", fontSize: "0.95rem" }}>✏️ Viết đánh giá của bạn</h4>
+                    <form onSubmit={handleSubmitReview} style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+                      <div>
+                        <div style={{ color: "#94a3b8", fontSize: "0.82rem", marginBottom: "4px" }}>Số sao *</div>
+                        <StarRating value={form.rating} onChange={r => setForm(f => ({ ...f, rating: r }))} size="1.6rem" />
+                      </div>
+                      <input
+                        type="text" maxLength={100} value={form.title} placeholder="Tiêu đề (tùy chọn)"
+                        onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                        style={{ padding: "0.6rem 0.9rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#1a1a2e", color: "#e2e8f0", outline: "none", fontSize: "0.9rem" }}
+                      />
+                      <textarea
+                        rows={3} maxLength={1000} value={form.comment} placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm này..."
+                        onChange={e => setForm(f => ({ ...f, comment: e.target.value }))}
+                        style={{ padding: "0.6rem 0.9rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#1a1a2e", color: "#e2e8f0", outline: "none", fontSize: "0.9rem", resize: "vertical" }}
+                      />
+                      {submitMsg.text && (
+                        <div style={{ padding: "0.6rem 1rem", borderRadius: "8px", background: submitMsg.type === "success" ? "#052e16" : "#450a0a", color: submitMsg.type === "success" ? "#86efac" : "#fca5a5", fontSize: "0.85rem" }}>
+                          {submitMsg.text}
+                        </div>
+                      )}
+                      <button type="submit" disabled={submitting} className="btn-main" style={{ alignSelf: "flex-start" }}>
+                        {submitting ? <Spinner /> : "📨 Gửi đánh giá"}
+                      </button>
+                    </form>
+                  </div>
+                )}
+                {user && alreadyReviewed && (
+                  <div style={{ padding: "0.8rem 1rem", background: "#052e16", borderRadius: "8px", color: "#86efac", fontSize: "0.85rem", marginBottom: "1.2rem" }}>
+                    ✅ Bạn đã đánh giá sản phẩm này rồi!
+                  </div>
+                )}
+                {!user && (
+                  <div style={{ padding: "0.8rem 1rem", background: "#1a1a2e", borderRadius: "8px", color: "#a78bfa", fontSize: "0.85rem", marginBottom: "1.2rem" }}>
+                    🔐 Đăng nhập để viết đánh giá
+                  </div>
+                )}
+
+                {/* Reviews List */}
+                {reviews.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "2rem", color: "#6b7280" }}>
+                    <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>💬</div>
+                    <p>Chưa có đánh giá nào. Hãy là người đầu tiên!</p>
+                  </div>
+                )}
+                {reviews.map(r => (
+                  <div key={r.id || r._id} style={{ borderTop: "1px solid #1f2937", paddingTop: "1rem", marginBottom: "1rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", color: "#fff", fontWeight: 700 }}>
+                          {(r.user?.fullName || r.user?.username || "?")[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ color: "#e2e8f0", fontSize: "0.9rem", fontWeight: 600 }}>{r.user?.fullName || r.user?.username || "Ẩn danh"}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <StarRating value={r.rating} readonly size="0.85rem" />
+                            {r.isVerifiedPurchase && (
+                              <span style={{ fontSize: "0.7rem", color: "#10b981", background: "#052e16", padding: "1px 6px", borderRadius: "999px" }}>✓ Đã mua</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <span style={{ color: "#6b7280", fontSize: "0.75rem" }}>
+                        {new Date(r.createdAt).toLocaleDateString("vi-VN")}
+                      </span>
+                    </div>
+                    {r.title && <div style={{ color: "#e2e8f0", fontWeight: 600, fontSize: "0.9rem", marginBottom: "4px" }}>{r.title}</div>}
+                    {r.comment && <p style={{ color: "#94a3b8", fontSize: "0.85rem", margin: "0 0 8px", lineHeight: 1.5 }}>{r.comment}</p>}
+                    <button
+                      type="button"
+                      onClick={() => handleHelpful(r.id || r._id)}
+                      disabled={helpfulVoted[r.id || r._id]}
+                      style={{ background: "transparent", border: "1px solid #2d2d3a", borderRadius: "6px", padding: "3px 10px", color: "#6b7280", fontSize: "0.75rem", cursor: helpfulVoted[r.id || r._id] ? "default" : "pointer" }}
+                    >
+                      👍 Hữu ích ({r.helpfulCount || 0})
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
@@ -2466,6 +2715,7 @@ function App() {
       case "account": return <AccountPage user={user} onLogin={handleLogin} onLogout={handleLogout} onRegister={handleLogin} />;
       case "admin": return <AdminPage onToast={showToast} />;
       case "payment-result": return <PaymentResultPage onNavigate={navigate} />;
+      case "contact": return <ContactPage />;
       default: return <HomePage products={products} variants={variants} onAddToCart={addToCart} user={user} onNavigate={navigate} onViewDetail={openDetail} />;
     }
   };
@@ -2540,7 +2790,263 @@ function App() {
         onClose={() => setToast({ message: "", type: "" })}
       />
 
-      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} />
+      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} user={user} />
+      <ChatWidget />
+    </div>
+  );
+}
+
+// ─── ContactPage ──────────────────────────────────────────────────────────────
+function ContactPage() {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", subject: "", message: "" });
+  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    // Giả lập gửi form
+    await new Promise(r => setTimeout(r, 1200));
+    setLoading(false);
+    setSubmitted(true);
+  };
+
+  const contacts = [
+    { icon: "📍", label: "Địa chỉ", value: "123 Đường Thời Trang, Q.1, TP.HCM" },
+    { icon: "📞", label: "Hotline", value: "1900 8888 (8:00 - 22:00)" },
+    { icon: "✉️", label: "Email", value: "hello@velashop.vn" },
+    { icon: "🕐", label: "Giờ mở cửa", value: "Thứ 2 – Chủ nhật: 9:00 – 22:00" },
+  ];
+
+  return (
+    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
+      {/* Hero banner */}
+      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "3rem 2rem", textAlign: "center", marginBottom: "2rem" }}>
+        <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>💌</div>
+        <h1 style={{ color: "#fff", margin: "0 0 0.5rem", fontSize: "2rem", fontWeight: 700 }}>Liên Hệ Với VELA</h1>
+        <p style={{ color: "#ddd6fe", margin: 0, fontSize: "1rem" }}>Chúng tôi luôn sẵn sàng hỗ trợ bạn 24/7</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "1.5rem" }}>
+        {/* Cột trái: Info */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          {/* Contact info cards */}
+          {contacts.map(c => (
+            <div key={c.label} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.2rem 1.5rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+              <div style={{ fontSize: "1.8rem", minWidth: "40px", textAlign: "center" }}>{c.icon}</div>
+              <div>
+                <div style={{ color: "#a78bfa", fontSize: "0.78rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "2px" }}>{c.label}</div>
+                <div style={{ color: "#e2e8f0", fontSize: "0.95rem" }}>{c.value}</div>
+              </div>
+            </div>
+          ))}
+
+          {/* Social links */}
+          <div style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.2rem 1.5rem" }}>
+            <div style={{ color: "#a78bfa", fontSize: "0.78rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.8rem" }}>Mạng xã hội</div>
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              {[
+                { label: "Facebook", emoji: "📘", url: "https://www.facebook.com/thai.ang.746808/?locale=vi_VN" },
+                { label: "Instagram", emoji: "📸", url: "https://www.instagram.com/dang17.4/" },
+                { label: "TikTok", emoji: "🎵", url: "https://www.tiktok.com/@thai1742004" },
+                { label: "Zalo", emoji: "💬", url: "https://zalo.me/0783321450" },
+              ].map(s => (
+                <a key={s.label} href={s.url} title={s.label} style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#2d2d3a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", textDecoration: "none", transition: "transform 0.2s" }}
+                  onMouseOver={e => e.currentTarget.style.transform = "scale(1.15)"}
+                  onMouseOut={e => e.currentTarget.style.transform = "scale(1)"}
+                >
+                  {s.emoji}
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Cột phải: Form liên hệ */}
+        <div style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "2rem" }}>
+          {submitted ? (
+            <div style={{ textAlign: "center", padding: "2rem 0" }}>
+              <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>🎉</div>
+              <h3 style={{ color: "#e2e8f0", marginBottom: "0.5rem" }}>Gửi thành công!</h3>
+              <p style={{ color: "#94a3b8" }}>Cảm ơn bạn đã liên hệ. Đội ngũ VELA sẽ phản hồi trong vòng 24 giờ.</p>
+              <button className="btn-main" style={{ marginTop: "1.5rem" }} onClick={() => { setSubmitted(false); setForm({ name: "", email: "", phone: "", subject: "", message: "" }); }}>
+                Gửi tin nhắn khác
+              </button>
+            </div>
+          ) : (
+            <>
+              <h3 style={{ color: "#e2e8f0", margin: "0 0 1.5rem", fontSize: "1.2rem" }}>✏️ Gửi Tin Nhắn</h3>
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
+                    Họ và tên *
+                    <input type="text" name="name" required value={form.name} onChange={handleChange} placeholder="Nguyễn Văn A"
+                      style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
+                    Số điện thoại
+                    <input type="tel" name="phone" value={form.phone} onChange={handleChange} placeholder="0909xxxxxx"
+                      style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
+                  </label>
+                </div>
+                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
+                  Email *
+                  <input type="email" name="email" required value={form.email} onChange={handleChange} placeholder="example@email.com"
+                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
+                  Chủ đề
+                  <select name="subject" value={form.subject} onChange={handleChange}
+                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }}>
+                    <option value="">-- Chọn chủ đề --</option>
+                    <option value="order">Hỏi về đơn hàng</option>
+                    <option value="return">Đổi / Trả hàng</option>
+                    <option value="product">Tư vấn sản phẩm</option>
+                    <option value="payment">Thanh toán</option>
+                    <option value="other">Khác</option>
+                  </select>
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
+                  Nội dung *
+                  <textarea name="message" required rows="4" value={form.message} onChange={handleChange} placeholder="Mô tả chi tiết vấn đề bạn gặp phải..."
+                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem", resize: "vertical" }} />
+                </label>
+                <button type="submit" className="btn-main" disabled={loading} style={{ width: "100%", padding: "0.85rem", fontSize: "1rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", borderRadius: "10px" }}>
+                  {loading ? <Spinner /> : "📨 Gửi tin nhắn"}
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Google Maps embed */}
+      <div style={{ marginTop: "1.5rem", borderRadius: "12px", overflow: "hidden", height: "280px", border: "1px solid #2d2d3a" }}>
+        <iframe
+          title="VELA Shop Location"
+          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3919.4946985938205!2d106.70143157507776!3d10.77505608938029!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x31752f40a3b49e59%3A0xa1bd14e483a602db!2zVHLGsOG7nW5nIEPDtG5nIFRo4beLxqFuZyBNYWkgVGjDumMgSOG7kyBDaMOtIE1pbmg!5e0!3m2!1svi!2svn!4v1712552000000!5m2!1svi!2svn"
+          width="100%" height="280" style={{ border: 0 }} allowFullScreen="" loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        ></iframe>
+      </div>
+
+      {/* FAQ nhanh */}
+      <div style={{ marginTop: "1.5rem" }}>
+        <h2 style={{ color: "#e2e8f0", fontSize: "1.2rem", marginBottom: "1rem" }}>❓ Câu Hỏi Thường Gặp</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+          {[
+            { q: "Thời gian giao hàng bao lâu?", a: "Thông thường 2–4 ngày làm việc trong TP.HCM và 3–7 ngày tỉnh thành khác." },
+            { q: "Cách đổi trả hàng thế nào?", a: "Miễn phí đổi trả trong vòng 7 ngày kể từ ngày nhận hàng, hàng còn nguyên tem, chưa giặt." },
+            { q: "Thanh toán có những cách nào?", a: "VELA hỗ trợ MoMo, COD và sẽ mở rộng thêm VNPay, thẻ ngân hàng trong thời gian tới." },
+            { q: "Size guide hướng dẫn ở đâu?", a: "Mỗi trang sản phẩm đều có bảng size chi tiết. Chatbot AI của VELA cũng có thể tư vấn size cho bạn!" },
+          ].map(item => (
+            <div key={item.q} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "10px", padding: "1.2rem" }}>
+              <div style={{ color: "#a78bfa", fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.4rem" }}>{item.q}</div>
+              <div style={{ color: "#94a3b8", fontSize: "0.85rem", lineHeight: 1.5 }}>{item.a}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── ChatWidget ────────────────────────────────────────────────────────────────
+function ChatWidget() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Xin chào! Tôi có thể giúp gì cho bạn hôm nay?" }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = React.useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => { scrollToBottom() }, [messages, isOpen]);
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+
+    const userMessage = { role: "user", text: input.trim() };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+
+    try {
+      // Gửi history (trừ message cuối) và userMessage
+      const history = messages.map(m => ({ role: m.role, text: m.text }));
+      const { reply, error } = await api.post("/api/chatbot", {
+        message: userMessage.text,
+        history: history
+      });
+
+      if (error) throw new Error(error);
+
+      setMessages([...newMessages, { role: "assistant", text: reply || "Không có phản hồi." }]);
+    } catch (err) {
+      setMessages([...newMessages, { role: "assistant", text: "Xin lỗi, lỗi khi kết nối AI: " + err.message }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", bottom: "20px", right: "20px", zIndex: 9999 }}>
+      {!isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          style={{ width: "60px", height: "60px", borderRadius: "50%", background: "#7c3aed", color: "#fff", border: "none", fontSize: "24px", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          💬
+        </button>
+      )}
+
+      {isOpen && (
+        <div style={{ width: "350px", height: "500px", background: "#1a1a2e", borderRadius: "12px", display: "flex", flexDirection: "column", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden", border: "1px solid #2d2d3a" }}>
+          <div style={{ padding: "15px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>🤖 VELA Assistant</h3>
+            <button onClick={() => setIsOpen(false)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: "18px", cursor: "pointer" }}>✖</button>
+          </div>
+
+          <div style={{ flex: 1, padding: "15px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", background: "#0f0f1a" }}>
+            {messages.map((msg, idx) => (
+              <div key={idx} style={{ alignSelf: msg.role === "user" ? "flex-end" : "flex-start", maxWidth: "80%" }}>
+                <div style={{ background: msg.role === "user" ? "#7c3aed" : "#2d2d3a", color: "#fff", padding: "10px 14px", borderRadius: msg.role === "user" ? "18px 18px 0 18px" : "18px 18px 18px 0", fontSize: "14px", lineHeight: "1.4", wordBreak: "break-word" }}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div style={{ alignSelf: "flex-start" }}>
+                <div style={{ background: "#2d2d3a", padding: "10px 14px", borderRadius: "18px 18px 18px 0", fontSize: "14px", color: "#a78bfa" }}>
+                  Đang thu thập thông tin...
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <form onSubmit={handleSend} style={{ display: "flex", padding: "10px", background: "#1a1a2e", borderTop: "1px solid #2d2d3a" }}>
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Nhập câu hỏi..."
+              style={{ flex: 1, padding: "10px", borderRadius: "20px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "14px" }}
+            />
+            <button type="submit" disabled={loading || !input.trim()} style={{ marginLeft: "8px", width: "40px", height: "40px", borderRadius: "50%", background: "#7c3aed", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ➤
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
