@@ -1,4 +1,4 @@
-const { useEffect, useState, useCallback } = React;
+const { useEffect, useState, useCallback, useRef } = React;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const pages = [
@@ -36,6 +36,7 @@ const parseResponse = async (r) => {
 };
 
 const BASE_URL = "http://127.0.0.1:3000";
+const GOOGLE_CLIENT_ID = "908102538508-8d4man9rvnc1s8u6ardainq2fu6c2req.apps.googleusercontent.com";
 
 const api = {
   get: (url) => fetch(BASE_URL + url).then(parseResponse),
@@ -1000,6 +1001,48 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState({ text: "", type: "" });
+  const googleButtonRef = useRef(null);
+
+  const handleGoogleCredentialResponse = async (response) => {
+    if (!response?.credential) {
+      setMessage({ text: "Không nhận được thông tin Google.", type: "error" });
+      return;
+    }
+    setLoading(true);
+    setMessage({ text: "", type: "" });
+    try {
+      const res = await fetch(BASE_URL + "/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: response.credential })
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        setMessage({ text: "Đăng nhập Google thành công!", type: "success" });
+        onLogin(data.user);
+      } else {
+        setMessage({ text: data.error || "Đăng nhập Google thất bại", type: "error" });
+      }
+    } catch (err) {
+      setMessage({ text: "Lỗi: " + err.message, type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLogin || !googleButtonRef.current || !window.google?.accounts?.id) return;
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredentialResponse,
+      ux_mode: "popup"
+    });
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      text: "signin_with"
+    });
+  }, [isLogin]);
 
   useEffect(() => {
     if (user) {
@@ -1351,6 +1394,11 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
             Mật khẩu
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
           </label>
+          {isLogin && (
+            <div style={{ margin: "1rem 0" }}>
+              <div ref={googleButtonRef} />
+            </div>
+          )}
           {!isLogin && (
             <>
               <label>
