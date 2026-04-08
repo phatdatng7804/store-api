@@ -31,7 +31,6 @@ const productVariantSchema = new mongoose.Schema({
     },
     stock: {
         type: Number,
-<<<<<<< HEAD
         required: true,
         default: 0
     },
@@ -40,15 +39,6 @@ const productVariantSchema = new mongoose.Schema({
         default: false
     },
     deletedAt: {
-=======
-        required: true
-    },
-    isDeleted:{
-        type: Boolean,
-        default: false
-    },
-    deletedAt:{
->>>>>>> bf292fd2b335bd508bcdba3d65c5f66857686a09
         type: Date,
         default: null
     }

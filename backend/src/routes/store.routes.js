@@ -8,7 +8,7 @@ import Size from "../models/size.model.js";
 import Cart from "../models/cart.model.js";
 import CartItem from "../models/cartItem.model.js";
 import Order from "../models/order.model.js";
-import OrderItem from "../models/orderItem.model.js";
+import OrderItem from '../models/orderItem.model.js';
 import User from "../models/user.model.js";
 import Coupon from "../models/coupon.model.js";
 import Role from "../models/role.model.js";
