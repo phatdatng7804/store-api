@@ -3,6 +3,17 @@ import authController from "../controllers/auth.controller.js";
 import { limiter } from "../middlewares/rateLimit.middleware.js";
 import authenticate from "../middlewares/auth.middleware.js";
 
+// Validation middleware
+const validate = (schema) => (req, res, next) => {
+    const { error, value } = schema.validate(req.body, { abortEarly: false });
+    if (error) {
+        const messages = error.details.map(d => d.message).join(", ");
+        return res.status(400).json({ error: messages });
+    }
+    req.validatedData = value;
+    next();
+};
+
 const router = Router();
 
 // POST /api/auth/register

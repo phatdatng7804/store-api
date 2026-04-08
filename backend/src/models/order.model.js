@@ -38,9 +38,12 @@ const orderSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    expectedDeliveryDate: {
+        type: Date
+    },
     status: {
         type: String,
-        enum: ["PENDING", "PAID", "FAILED", "CANCELLED"],
+        enum: ["PENDING", "CONFIRMED", "PAID", "SHIPPING", "DELIVERED", "COMPLETED", "CANCELLED", "FAILED"],
         default: "PENDING"
     },
     paymentMethod: {
@@ -55,7 +58,15 @@ const orderSchema = new mongoose.Schema({
     momoTransId: {
         type: String,
         default: ""
-    }
+    },
+    statusHistory: [{
+        status: String,
+        changedAt: {
+            type: Date,
+            default: Date.now
+        },
+        note: String
+    }]
 }, { timestamps: true });
 
 export default mongoose.model("Order", orderSchema);

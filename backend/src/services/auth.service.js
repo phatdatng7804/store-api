@@ -95,17 +95,16 @@ const googleLogin = async ({ idToken }) => {
 };
 
 const register = async ({ username, email, password, fullName, phone }) => {
-    if (!username) throw createError.BadRequest("Tên đăng nhập không được để trống");
-    if (!email) throw createError.BadRequest("Email không được để trống");
-    if (!password) throw createError.BadRequest("Mật khẩu không được để trống");
+    if (!username) throw createError(400, "Tên đăng nhập không được để trống");
+    if (!email) throw createError(400, "Email không được để trống");
+    if (!password) throw createError(400, "Mật khẩu không được để trống");
 
     const existingUsername = await User.findOne({ username: username.toLowerCase() });
-    if (existingUsername) throw createError.Conflict("Tên đăng nhập đã tồn tại");
+    if (existingUsername) throw createError(409, "Tên đăng nhập đã tồn tại");
 
     const existingEmail = await User.findOne({ email: email.toLowerCase() });
-    if (existingEmail) throw createError.Conflict("Email đã được sử dụng");
+    if (existingEmail) throw createError(409, "Email đã được sử dụng");
 
-    // Find USER role
     let userRole = await Role.findOne({ code: "USER" });
     if (!userRole) {
         userRole = await Role.create({ code: "USER", name: "User" });
@@ -119,7 +118,7 @@ const register = async ({ username, email, password, fullName, phone }) => {
         phone: phone || "",
         role: userRole._id
     });
-    
+
     const populated = await User.findById(newUser._id).populate("role");
     return { user: formatUser(populated), message: "Đăng ký thành công" };
 };
@@ -130,7 +129,7 @@ const login = async ({ username, email, password }) => {
 
     const query = username ? { username: username.toLowerCase() } : { email: email.toLowerCase() };
     const user = await User.findOne(query).populate("role");
-    
+
     if (!user) {
         throw createError.Unauthorized("Thông tin đăng nhập không đúng");
     }
@@ -144,19 +143,16 @@ const login = async ({ username, email, password }) => {
     if (user.isDeleted) {
         throw createError.Forbidden("Tài khoản đã bị xóa");
     }
-    
-    // Tạo access token và refresh token
+
     const accessToken = generateAccessToken({
         userId: user._id,
         role: user.role ? user.role.code : "USER"
     });
-    
     const refreshToken = generateRefreshToken({
         userId: user._id,
         role: user.role ? user.role.code : "USER"
     });
 
-    // Lưu refresh token vào DB
     user.refreshToken = refreshToken;
     await user.save();
 
@@ -165,21 +161,17 @@ const login = async ({ username, email, password }) => {
 
 const refreshTokenService = async ({ refreshToken }) => {
     if (!refreshToken) {
-        throw createError.BadRequest("Refresh token là bắt buộc");
+        throw createError(400, "Refresh token là bắt buộc");
     }
 
     try {
-        // Kiểm tra tính hợp lệ của token
         const decoded = verifyRefreshToken(refreshToken);
-
-        // Tìm user với refresh token
         const user = await User.findOne({ _id: decoded.userId, refreshToken }).populate("role");
 
         if (!user) {
-            throw createError.Unauthorized("Refresh token không hợp lệ hoặc đã hết hạn");
+            throw createError(401, "Refresh token không hợp lệ hoặc đã hết hạn");
         }
 
-        // Tạo tokens mới
         const newAccessToken = generateAccessToken({
             userId: user._id,
             role: user.role ? user.role.code : "USER"
@@ -190,23 +182,21 @@ const refreshTokenService = async ({ refreshToken }) => {
             role: user.role ? user.role.code : "USER"
         });
 
-        // Cập nhật refresh token trong DB
         user.refreshToken = newRefreshToken;
         await user.save();
 
         return { accessToken: newAccessToken, refreshToken: newRefreshToken };
     } catch (error) {
-        throw createError.Unauthorized("Refresh token không hợp lệ hoặc đã hết hạn");
+        throw createError(401, "Refresh token không hợp lệ hoặc đã hết hạn");
     }
 };
 
 const logout = async (userId) => {
     const user = await User.findById(userId);
     if (!user) {
-        throw createError.NotFound("User không tồn tại");
+        throw createError(404, "User không tồn tại");
     }
 
-    // Xóa refresh token
     user.refreshToken = null;
     await user.save();
 
