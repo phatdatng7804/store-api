@@ -9,6 +9,11 @@ Backend API + Frontend UI
 PORT=3000
 MONGODB_URI=mongodb://127.0.0.1:27017/storedb
 JWT_SECRET=your-secret-key
+MOMO_PARTNER_CODE=MOMO
+MOMO_ACCESS_KEY=your-access-key
+MOMO_SECRET_KEY=your-secret-key
+MOMO_REDIRECT_URL=http://127.0.0.1
+MOMO_IPN_URL=http://127.0.0.1
 ```
 2. Chạy backend:
 ```

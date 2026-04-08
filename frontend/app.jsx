@@ -44,6 +44,23 @@ const fileToDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
+const mapId = (obj) => {
+  if (Array.isArray(obj)) return obj.map(mapId);
+  if (obj !== null && typeof obj === 'object') {
+    const newObj = { ...obj };
+    if (newObj._id && !newObj.id) {
+      newObj.id = newObj._id;
+    }
+    for (const key in newObj) {
+      if (newObj[key] !== null && typeof newObj[key] === 'object') {
+        newObj[key] = mapId(newObj[key]);
+      }
+    }
+    return newObj;
+  }
+  return obj;
+};
+
 const parseResponse = async (r) => {
   const raw = await r.text();
   const data = raw ? JSON.parse(raw) : null;
@@ -51,7 +68,7 @@ const parseResponse = async (r) => {
     const message = data?.error || data?.message || `HTTP ${r.status}`;
     throw new Error(message);
   }
-  return data;
+  return mapId(data);
 };
 
 const BASE_URL = "http://127.0.0.1:3000";
@@ -825,7 +842,15 @@ function CheckoutPage({ user, onNavigate }) {
                 <p>Tạm tính <span>{formatVND(total)}</span></p>
                 <p>Phí vận chuyển <span className="free">Miễn phí</span></p>
                 {discountData && (
-                  <p>Giảm giá ({discountData.code}) <span className="free">-{formatVND(discountData.discountAmount)}</span></p>
+                  <p>
+                    Giảm giá ({discountData.code})
+                    {discountData.discountType === 'PERCENTAGE' ? (
+                      <span style={{ display: "inline-block", marginLeft: "0.5rem", padding: "0.2rem 0.5rem", backgroundColor: "#28a745", color: "white", borderRadius: "4px", fontSize: "0.85rem", fontWeight: "bold" }}>%</span>
+                    ) : (
+                      <span style={{ display: "inline-block", marginLeft: "0.5rem", padding: "0.2rem 0.5rem", backgroundColor: "#fd7e14", color: "white", borderRadius: "4px", fontSize: "0.85rem", fontWeight: "bold" }}>đ</span>
+                    )}
+                    <span className="free">-{formatVND(discountData.discountAmount)}</span>
+                  </p>
                 )}
                 <p className="total-row">Tổng cộng <span>{formatVND(Math.max(0, total - Number(discountData?.discountAmount || 0)))}</span></p>
               </div>
@@ -938,6 +963,7 @@ function OrdersPage({ user, onNavigate }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [showTracking, setShowTracking] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -974,78 +1000,102 @@ function OrdersPage({ user, onNavigate }) {
   };
 
   return (
-    <section className="panel layout-2">
-      <article className="card">
-        <h3>📋 Lịch sử đơn hàng</h3>
-        {loading && <Spinner />}
-        {orders.length === 0 && !loading && (
-          <div className="empty-cart">
-            <div style={{ fontSize: "3rem" }}>📦</div>
-            <p>Chưa có đơn hàng nào</p>
-            <button className="btn-main" type="button" onClick={() => onNavigate("catalog")}>
-              Mua sắm ngay
-            </button>
-          </div>
-        )}
-        <div className="orders-list">
-          {orders.map((order) => (
-            <div
-              key={order.id}
-              className={`order-row ${selected?.id === order.id ? "selected" : ""}`}
-              onClick={() => setSelected(order)}
-            >
-              <div className="order-row-left">
-                <strong>Đơn #{order.id}</strong>
-                <span className="order-date">
-                  {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
-                </span>
+    <>
+      <section className="panel layout-2">
+        <article className="card">
+          <h3>📋 Lịch sử đơn hàng</h3>
+          {loading && <Spinner />}
+          {orders.length === 0 && !loading && (
+            <div className="empty-cart">
+              <div style={{ fontSize: "3rem" }}>📦</div>
+              <p>Chưa có đơn hàng nào</p>
+              <button className="btn-main" type="button" onClick={() => onNavigate("catalog")}>
+                Mua sắm ngay
+              </button>
+            </div>
+          )}
+          <div className="orders-list">
+            {orders.map((order) => (
+              <div
+                key={order.id}
+                className={`order-row ${selected?.id === order.id ? "selected" : ""}`}
+                onClick={() => setSelected(order)}
+              >
+                <div className="order-row-left">
+                  <strong>Đơn #{order.id}</strong>
+                  <span className="order-date">
+                    {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
+                  </span>
+                </div>
+                <div className="order-row-right">
+                  <span className="order-total">{formatVND(order.totalAmount || 0)}</span>
+                  <span
+                    className="status-badge"
+                    style={{ background: statusColor[order.status] || "#6b7280" }}
+                  >
+                    {order.status}
+                  </span>
+                </div>
               </div>
-              <div className="order-row-right">
-                <span className="order-total">{formatVND(order.totalAmount || 0)}</span>
-                <span
-                  className="status-badge"
-                  style={{ background: statusColor[order.status] || "#6b7280" }}
-                >
-                  {order.status}
+            ))}
+          </div>
+        </article>
+
+        <article className="card">
+          <h3>Chi tiết đơn hàng</h3>
+          {selected ? (
+            <div className="order-detail">
+              <p><strong>Mã đơn:</strong> #{selected.id}</p>
+              <p><strong>Trạng thái:</strong>{" "}
+                <span className="status-badge" style={{ background: statusColor[selected.status] }}>
+                  {selected.status}
                 </span>
+              </p>
+              <p><strong>Tổng tiền:</strong> {formatVND(selected.totalAmount || 0)}</p>
+              <p><strong>Thanh toán:</strong> {selected.paymentMethod}</p>
+              {selected.receiverName && <p><strong>Người nhận:</strong> {selected.receiverName}</p>}
+              {selected.receiverPhone && <p><strong>Điện thoại:</strong> {selected.receiverPhone}</p>}
+              {selected.shippingAddress && <p><strong>Địa chỉ:</strong> {selected.shippingAddress}</p>}
+              {selected.momoTransId && <p><strong>Mã GD MoMo:</strong> {selected.momoTransId}</p>}
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-main"
+                  onClick={() => setShowTracking(true)}
+                >
+                  🚚 Theo dõi đơn
+                </button>
+                {selected.status === "PENDING" && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ color: "#ef4444", borderColor: "#ef4444" }}
+                    onClick={() => cancelOrder(selected.id)}
+                  >
+                    Hủy đơn hàng
+                  </button>
+                )}
               </div>
             </div>
-          ))}
-        </div>
-      </article>
+          ) : (
+            <div className="notice">Chọn một đơn hàng để xem chi tiết</div>
+          )}
+        </article>
+      </section>
 
-      <article className="card">
-        <h3>Chi tiết đơn hàng</h3>
-        {selected ? (
-          <div className="order-detail">
-            <p><strong>Mã đơn:</strong> #{selected.id}</p>
-            <p><strong>Trạng thái:</strong>{" "}
-              <span className="status-badge" style={{ background: statusColor[selected.status] }}>
-                {selected.status}
-              </span>
-            </p>
-            <p><strong>Tổng tiền:</strong> {formatVND(selected.totalAmount || 0)}</p>
-            <p><strong>Thanh toán:</strong> {selected.paymentMethod}</p>
-            {selected.receiverName && <p><strong>Người nhận:</strong> {selected.receiverName}</p>}
-            {selected.receiverPhone && <p><strong>Điện thoại:</strong> {selected.receiverPhone}</p>}
-            {selected.shippingAddress && <p><strong>Địa chỉ:</strong> {selected.shippingAddress}</p>}
-            {selected.momoTransId && <p><strong>Mã GD MoMo:</strong> {selected.momoTransId}</p>}
-            {selected.status === "PENDING" && (
-              <button
-                type="button"
-                className="ghost"
-                style={{ marginTop: "1rem", color: "#ef4444", borderColor: "#ef4444" }}
-                onClick={() => cancelOrder(selected.id)}
-              >
-                Hủy đơn hàng
-              </button>
-            )}
+      {/* Order Tracking Modal */}
+      {showTracking && selected && (
+        <div className="modal-backdrop" onClick={() => setShowTracking(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3>🚚 Theo dõi đơn hàng</h3>
+            <OrderTrackingDisplay orderId={selected.id} />
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.5rem" }}>
+              <button type="button" className="ghost" onClick={() => setShowTracking(false)}>Đóng</button>
+            </div>
           </div>
-        ) : (
-          <div className="notice">Chọn một đơn hàng để xem chi tiết</div>
-        )}
-      </article>
-    </section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1064,6 +1114,7 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   const [activeSection, setActiveSection] = useState("profile"); // profile | orders | vouchers
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [coupons, setCoupons] = useState([]);
 
   // Profile Edit
@@ -1129,7 +1180,10 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   }, [user]);
 
   useEffect(() => {
-    if (!user || activeSection !== "orders") return;
+    if (!user || activeSection !== "orders") {
+      setSelectedOrderId(null);
+      return;
+    }
     setOrdersLoading(true);
     api
       .get(`/api/orders/user/${user.id}`)
@@ -1352,44 +1406,54 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
           )}
 
           {activeSection === "orders" && (
-            <>
-              <h3>📦 Đơn hàng của tôi</h3>
-              <p className="account-section-desc">
-                Xem nhanh các đơn đã đặt và trạng thái thanh toán.
-              </p>
-              {ordersLoading && <Spinner />}
-              {!ordersLoading && orders.length === 0 && (
-                <div className="empty-cart">
-                  <div style={{ fontSize: "3rem" }}>📭</div>
-                  <p>Chưa có đơn hàng nào.</p>
+            selectedOrderId ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 style={{ margin: 0 }}>Quản lý đơn hàng #{selectedOrderId}</h3>
+                  <button type="button" className="ghost small" onClick={() => setSelectedOrderId(null)}>Quay lại danh sách</button>
                 </div>
-              )}
-              <div className="orders-list">
-                {orders.map((order) => (
-                  <div key={order.id} className="order-row">
-                    <div className="order-row-left">
-                      <strong>Đơn #{order.id}</strong>
-                      <span className="order-date">
-                        {order.createdAt
-                          ? new Date(order.createdAt).toLocaleDateString("vi-VN")
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="order-row-right">
-                      <span className="order-total">
-                        {formatVND(order.totalAmount || 0)}
-                      </span>
-                      <span
-                        className="status-badge"
-                        style={{ background: statusColor[order.status] || "#6b7280" }}
-                      >
-                        {order.status}
-                      </span>
-                    </div>
+                <OrderTrackingDisplay orderId={selectedOrderId} />
+              </>
+            ) : (
+              <>
+                <h3>📦 Đơn hàng của tôi</h3>
+                <p className="account-section-desc">
+                  Xem nhanh các đơn đã đặt và trạng thái thanh toán.
+                </p>
+                {ordersLoading && <Spinner />}
+                {!ordersLoading && orders.length === 0 && (
+                  <div className="empty-cart">
+                    <div style={{ fontSize: "3rem" }}>📭</div>
+                    <p>Chưa có đơn hàng nào.</p>
                   </div>
-                ))}
-              </div>
-            </>
+                )}
+                <div className="orders-list">
+                  {orders.map((order) => (
+                    <div key={order.id} className="order-row" style={{ cursor: "pointer" }} onClick={() => setSelectedOrderId(order.id)}>
+                      <div className="order-row-left">
+                        <strong>Đơn #{order.id}</strong>
+                        <span className="order-date">
+                          {order.createdAt
+                            ? new Date(order.createdAt).toLocaleDateString("vi-VN")
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="order-row-right">
+                        <span className="order-total">
+                          {formatVND(order.totalAmount || 0)}
+                        </span>
+                        <span
+                          className="status-badge"
+                          style={{ background: statusColor[order.status] || "#6b7280" }}
+                        >
+                          {order.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
           )}
 
           {activeSection === "vouchers" && (
@@ -1497,15 +1561,18 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
 // ─── AdminPage ────────────────────────────────────────────────────────────────
 function AdminPage({ onToast }) {
   const modules = [
-    { key: "products", label: "Sản phẩm", endpoint: "/api/admin/products" },
-    { key: "categories", label: "Danh mục", endpoint: "/api/admin/categories" },
-    { key: "variants", label: "Biến thể", endpoint: "/api/admin/product-variants" },
-    { key: "users", label: "Người dùng", endpoint: "/api/admin/users" },
-    { key: "orders", label: "Đơn hàng", endpoint: "/api/orders" },
-    { key: "coupons", label: "Mã giảm giá", endpoint: "/api/coupons" }
+    { key: "products", label: "🛍️ Sản phẩm", endpoint: "/api/admin/products" },
+    { key: "categories", label: "📂 Danh mục", endpoint: "/api/admin/categories" },
+    { key: "variants", label: "📦 Biến thể", endpoint: "/api/admin/product-variants" },
+    { key: "users", label: "👥 Người dùng", endpoint: "/api/admin/users" },
+    { key: "orders", label: "🛒 Đơn hàng", endpoint: "/api/orders" },
+    { key: "coupons", label: "🎟️ Mã giảm giá", endpoint: "/api/coupons" },
+    { key: "revenue-stats", label: "📊 Doanh thu", endpoint: "/api/admin/revenue-stats" },
+    { key: "reviews", label: "⭐ Đánh giá", endpoint: "/api/reviews" }
   ];
   const [activeModule, setActiveModule] = useState("products");
   const [items, setItems] = useState([]);
+  const [revenueStatsLoading, setRevenueStatsLoading] = useState(false);
   const [couponForm, setCouponForm] = useState({
     code: "",
     discountType: "FIXED",
@@ -1626,6 +1693,9 @@ function AdminPage({ onToast }) {
   const isOrdersModule = activeModule === "orders";
   const isVariantModule = activeModule === "variants";
   const isCouponModule = activeModule === "coupons";
+  const isRevenueStatsModule = activeModule === "revenue-stats";
+  const isReviewsModule = activeModule === "reviews";
+  const [period, setPeriod] = useState("month");
 
   const stockByProductId = allVariants.reduce((acc, variant) => {
     const pid = variant.product?.id;
@@ -1972,63 +2042,78 @@ function AdminPage({ onToast }) {
         </nav>
       </aside>
 
-      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
+      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: isRevenueStatsModule || isReviewsModule ? "1fr" : "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
         <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           <h3 style={{ marginBottom: "1rem" }}>{currentModule?.label}</h3>
-          {isProductModule && (
-            <div className="admin-stock-filter">
-              <button
-                type="button"
-                className={stockFilter === "all" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("all")}
-              >
-                Tất cả
-              </button>
-              <button
-                type="button"
-                className={stockFilter === "in" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("in")}
-              >
-                Còn hàng
-              </button>
-              <button
-                type="button"
-                className={stockFilter === "out" ? "chip light selected" : "chip light"}
-                onClick={() => setStockFilter("out")}
-              >
-                Hết hàng
-              </button>
+          {isRevenueStatsModule ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <button type="button" className={period === "day" ? "chip light selected" : "chip light"} onClick={() => setPeriod("day")}>Hôm nay</button>
+                <button type="button" className={period === "week" ? "chip light selected" : "chip light"} onClick={() => setPeriod("week")}>Tuần này</button>
+                <button type="button" className={period === "month" ? "chip light selected" : "chip light"} onClick={() => setPeriod("month")}>Tháng này</button>
+              </div>
+              <RevenueStatsDisplay period={period} onPeriodChange={setPeriod} />
             </div>
+          ) : isReviewsModule ? (
+            <ReviewsManagementDisplay />
+          ) : (
+            <>
+              {isProductModule && (
+                <div className="admin-stock-filter">
+                  <button
+                    type="button"
+                    className={stockFilter === "all" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("all")}
+                  >
+                    Tất cả
+                  </button>
+                  <button
+                    type="button"
+                    className={stockFilter === "in" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("in")}
+                  >
+                    Còn hàng
+                  </button>
+                  <button
+                    type="button"
+                    className={stockFilter === "out" ? "chip light selected" : "chip light"}
+                    onClick={() => setStockFilter("out")}
+                  >
+                    Hết hàng
+                  </button>
+                </div>
+              )}
+              <div className="notice">
+                Module: <strong>{currentModule?.label}</strong>.
+                {loading ? " Đang tải..." : ` Tổng ${filteredItems.length} mục.`}
+              </div>
+              {actionMessage && <div className="notice error">{actionMessage}</div>}
+              <div className="admin-list">
+                {filteredItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={selectedId === item.id ? "admin-row selected" : "admin-row"}
+                    onClick={() => setSelectedId(item.id)}
+                  >
+                    <strong>#{item.id.slice(-6)}</strong>
+                    <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {item.name || item.username || item.email || item.code || item.status || "(no title)"}
+                    </span>
+                    {isVariantModule && <span style={{ flexShrink: 0 }}>SKU: {item.sku || "—"}</span>}
+                    {isVariantModule && <span className="stock-tag in" style={{ flexShrink: 0 }}>Kho: {item.stock ?? 0}</span>}
+                    {isProductModule && (
+                      <span className={(stockByProductId[item.id] || 0) > 0 ? "stock-tag in" : "stock-tag out"} style={{ flexShrink: 0 }}>
+                        {(stockByProductId[item.id] || 0) > 0 ? "Còn hàng" : "Hết hàng"}
+                      </span>
+                    )}
+                    {item.totalAmount && <span style={{ flexShrink: 0 }}>{formatVND(item.totalAmount)}</span>}
+                  </button>
+                ))}
+                {filteredItems.length === 0 && !loading && <p className="notice">Không có dữ liệu.</p>}
+              </div>
+            </>
           )}
-          <div className="notice">
-            Module: <strong>{currentModule?.label}</strong>.
-            {loading ? " Đang tải..." : ` Tổng ${filteredItems.length} mục.`}
-          </div>
-          {actionMessage && <div className="notice error">{actionMessage}</div>}
-          <div className="admin-list">
-            {filteredItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={selectedId === item.id ? "admin-row selected" : "admin-row"}
-                onClick={() => setSelectedId(item.id)}
-              >
-                <strong>#{item.id.slice(-6)}</strong>
-                <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {item.name || item.username || item.email || item.code || item.status || "(no title)"}
-                </span>
-                {isVariantModule && <span style={{ flexShrink: 0 }}>SKU: {item.sku || "—"}</span>}
-                {isVariantModule && <span className="stock-tag in" style={{ flexShrink: 0 }}>Kho: {item.stock ?? 0}</span>}
-                {isProductModule && (
-                  <span className={(stockByProductId[item.id] || 0) > 0 ? "stock-tag in" : "stock-tag out"} style={{ flexShrink: 0 }}>
-                    {(stockByProductId[item.id] || 0) > 0 ? "Còn hàng" : "Hết hàng"}
-                  </span>
-                )}
-                {item.totalAmount && <span style={{ flexShrink: 0 }}>{formatVND(item.totalAmount)}</span>}
-              </button>
-            ))}
-            {filteredItems.length === 0 && !loading && <p className="notice">Không có dữ liệu.</p>}
-          </div>
         </div>
         <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           {isCouponModule ? (
@@ -2382,18 +2467,76 @@ function AdminPage({ onToast }) {
               </div>
             </>
           ) : isOrdersModule ? (
-            <>
-              <h3>📊 Thống kê đơn hàng</h3>
-              <div className="notice">
-                Tổng đơn hàng: <strong>{items.length}</strong>
+            selectedId ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3>Quản lý đơn hàng #{selectedId}</h3>
+                  <button type="button" className="ghost small" onClick={() => setSelectedId(null)}>Quay lại</button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "1rem", background: "none", border: "1px solid var(--border)", borderRadius: "8px" }}>
+                  <label style={{ fontWeight: 600, margin: 0 }}>Cập nhật trạng thái:</label>
+                  <select
+                    value={items.find(i => i.id === selectedId)?.status || ""}
+                    onChange={async (e) => {
+                      const newStatus = e.target.value;
+                      if (!confirm("Xác nhận đổi trạng thái đơn hàng?")) return;
+                      try {
+                        await api.put(`/api/admin/orders/${selectedId}/status`, { status: newStatus });
+                        onToast("Cập nhật trạng thái thành công!", "success");
+                        loadItems();
+                        setSelectedId(null);
+                      } catch (err) {
+                        onToast("Lỗi: " + err.message, "error");
+                      }
+                    }}
+                    style={{ flex: 1, padding: "0.5rem" }}
+                  >
+                    <option value="PENDING">PENDING (Chờ xử lý)</option>
+                    <option value="CONFIRMED">CONFIRMED (Đã xác nhận)</option>
+                    <option value="PAID">PAID (Đã thanh toán)</option>
+                    <option value="SHIPPING">SHIPPING (Đang giao hàng)</option>
+                    <option value="DELIVERED">DELIVERED (Giao thành công)</option>
+                    <option value="COMPLETED">COMPLETED (Hoàn tất)</option>
+                    <option value="CANCELLED">CANCELLED (Đã hủy)</option>
+                    <option value="FAILED">FAILED (Thanh toán lỗi)</option>
+                  </select>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "1rem", background: "none", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "1rem" }}>
+                  <label style={{ fontWeight: 600, margin: 0, minWidth: "140px" }}>Ngày dự kiến giao:</label>
+                  <input
+                    type="date"
+                    className="admin-input-date"
+                    value={items.find(i => i.id === selectedId)?.expectedDeliveryDate ? items.find(i => i.id === selectedId).expectedDeliveryDate.substring(0, 10) : ""}
+                    onChange={async (e) => {
+                      const dt = e.target.value;
+                      if (!confirm("Xác nhận cập nhật ngày dự kiến giao?")) return;
+                      try {
+                        await api.put(`/api/admin/orders/${selectedId}/status`, { expectedDeliveryDate: dt || null });
+                        onToast("Cập nhật ngày giao thành công!", "success");
+                        loadItems();
+                      } catch (err) {
+                        onToast("Lỗi: " + err.message, "error");
+                      }
+                    }}
+                    style={{ flex: 1, padding: "0.5rem" }}
+                  />
+                </div>
+                <OrderTrackingDisplay orderId={selectedId} />
               </div>
-              <div className="notice">
-                Đã thanh toán: <strong>{items.filter((i) => i.status === "PAID").length}</strong>
-              </div>
-              <div className="notice">
-                Đang chờ: <strong>{items.filter((i) => i.status === "PENDING").length}</strong>
-              </div>
-            </>
+            ) : (
+              <>
+                <h3>📊 Thống kê đơn hàng</h3>
+                <div className="notice">
+                  Tổng đơn hàng: <strong>{items.length}</strong>
+                </div>
+                <div className="notice">
+                  Đã thanh toán: <strong>{items.filter((i) => i.status === "PAID" || i.status === "COMPLETED").length}</strong>
+                </div>
+                <div className="notice">
+                  Đang chờ: <strong>{items.filter((i) => i.status === "PENDING" || i.status === "CONFIRMED").length}</strong>
+                </div>
+              </>
+            )
           ) : (
             <>
               <h3>📊 Thống kê nhanh</h3>
@@ -2475,387 +2618,36 @@ function Footer({ onNavigate }) {
   );
 }
 
-function InfoPage({ title, subtitle, blocks }) {
-  return (
-    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
-      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "2rem", color: "#fff", marginBottom: "2rem" }}>
-        <h1 style={{ margin: 0, fontSize: "2rem", fontWeight: 700 }}>{title}</h1>
-        <p style={{ margin: "0.75rem 0 0", color: "#d8b4fe", fontSize: "1rem" }}>{subtitle}</p>
-      </div>
-      <div style={{ display: "grid", gap: "1.25rem" }}>
-        {blocks.map((block, index) => (
-          <div key={index} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.5rem" }}>
-            <h2 style={{ margin: 0, marginBottom: "0.75rem", fontSize: "1.1rem" }}>{block.heading}</h2>
-            {Array.isArray(block.content) ? (
-              <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
-                {block.content.map((item, idx) => (
-                  <li key={idx} style={{ marginBottom: "0.5rem", color: "#e2e8f0" }}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <p style={{ margin: 0, color: "#e2e8f0" }}>{block.content}</p>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AboutPage() {
-  return (
-    <InfoPage
-      title="Về chúng tôi"
-      subtitle="VELA đem đến trải nghiệm thời trang hiện đại, chất lượng và thân thiện với người dùng."
-      blocks={[
-        { heading: "Sứ mệnh", content: "Mang đến phong cách thời trang tiện nghi và tinh tế cho mọi khách hàng, với sản phẩm chất lượng và dịch vụ tận tâm." },
-        { heading: "Giá trị cốt lõi", content: ["Chất lượng cao", "Thiết kế hợp thời", "Dịch vụ khách hàng tận tâm", "Giao hàng nhanh chóng và an toàn"] },
-        { heading: "Cam kết", content: "Chúng tôi luôn nỗ lực để đảm bảo sản phẩm đúng mô tả, quy trình đặt hàng an toàn và hỗ trợ khách hàng nhanh chóng." },
-      ]}
-    />
-  );
-}
-
-function SizeGuidePage() {
-  return (
-    <InfoPage
-      title="Hướng dẫn size"
-      subtitle="Chọn size phù hợp giúp bạn mặc vừa vặn và tự tin hơn."
-      blocks={[
-        { heading: "Bảng quy đổi cơ bản", content: ["XS: Vòng ngực 78-82 cm", "S: Vòng ngực 83-87 cm", "M: Vòng ngực 88-92 cm", "L: Vòng ngực 93-97 cm", "XL: Vòng ngực 98-102 cm"] },
-        { heading: "Lưu ý khi đo", content: ["Đo ngang vòng ngực ở phần rộng nhất", "Đo vòng eo tại điểm nhỏ nhất", "Đo vòng mông tại điểm rộng nhất", "So sánh với bảng size của sản phẩm để chọn chuẩn nhất"] },
-      ]}
-    />
-  );
-}
-
-function ShippingPolicyPage() {
-  return (
-    <InfoPage
-      title="Chính sách vận chuyển"
-      subtitle="Mọi đơn hàng được khởi tạo nhanh chóng và giao đến tay bạn an toàn."
-      blocks={[
-        { heading: "Thời gian giao hàng", content: "Đơn hàng sẽ được xử lý trong vòng 24 giờ làm việc và giao trong 2-5 ngày làm việc tuỳ khu vực." },
-        { heading: "Phí vận chuyển", content: ["Miễn phí cho đơn hàng từ 999k", "Đơn dưới 999k chịu phí vận chuyển theo danh mục sản phẩm", "Phí chuyển phát có thể thay đổi khi có khuyến mãi"] },
-        { heading: "Theo dõi đơn hàng", content: "Bạn có thể theo dõi trạng thái đơn hàng qua email hoặc trang quản lý đơn hàng sau khi đăng nhập." },
-      ]}
-    />
-  );
-}
-
-function FAQPage() {
-  return (
-    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
-      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "2rem", color: "#fff", marginBottom: "2rem" }}>
-        <h1 style={{ margin: 0, fontSize: "2rem", fontWeight: 700 }}>FAQ</h1>
-        <p style={{ margin: "0.75rem 0 0", color: "#d8b4fe", fontSize: "1rem" }}>Câu hỏi thường gặp về đặt hàng, vận chuyển và đổi trả.</p>
-      </div>
-      <div style={{ display: "grid", gap: "1rem" }}>
-        {[
-          { question: "Làm sao để đặt hàng?", answer: "Chọn sản phẩm, thêm vào giỏ, đi tới trang thanh toán và hoàn tất thông tin vận chuyển." },
-          { question: "Thời gian xử lý đơn hàng là bao lâu?", answer: "Đơn hàng được xử lý trong vòng 24 giờ làm việc kể từ khi xác nhận thanh toán." },
-          { question: "Tôi có thể trả hàng không?", answer: "Có, bạn có thể đổi trả trong vòng 7 ngày kể từ khi nhận hàng, theo điều kiện sản phẩm còn nguyên vẹn." },
-        ].map((item, index) => (
-          <div key={index} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.5rem" }}>
-            <h2 style={{ margin: 0, marginBottom: "0.75rem", fontSize: "1.05rem" }}>{item.question}</h2>
-            <p style={{ margin: 0, color: "#e2e8f0" }}>{item.answer}</p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ReturnsPage() {
-  return (
-    <InfoPage
-      title="Đổi trả hàng"
-      subtitle="Chúng tôi hỗ trợ đổi trả nhanh chóng khi sản phẩm không vừa ý hoặc gặp lỗi." 
-      blocks={[
-        { heading: "Điều kiện đổi trả", content: ["Sản phẩm còn nguyên tem mác, chưa qua sử dụng", "Giữ hóa đơn hoặc mã đơn hàng", "Thông báo đổi trả trong vòng 7 ngày kể từ ngày nhận hàng"] },
-        { heading: "Quy trình", content: ["Liên hệ với bộ phận chăm sóc khách hàng", "Gửi hình ảnh sản phẩm nếu có lỗi", "Chúng tôi sẽ hướng dẫn đổi trả và hoàn tiền nhanh nhất"] },
-      ]}
-    />
-  );
-}
-
-// ─── StarRating ───────────────────────────────────────────────────────────────
-function StarRating({ value, onChange, readonly = false, size = "1.2rem" }) {
-  const [hovered, setHovered] = useState(0);
-  const display = hovered || value;
-  return (
-    <span style={{ display: "inline-flex", gap: "2px" }}>
-      {[1, 2, 3, 4, 5].map(star => (
-        <span
-          key={star}
-          style={{ fontSize: size, cursor: readonly ? "default" : "pointer", color: display >= star ? "#f59e0b" : "#374151", transition: "color 0.1s" }}
-          onClick={() => !readonly && onChange?.(star)}
-          onMouseEnter={() => !readonly && setHovered(star)}
-          onMouseLeave={() => !readonly && setHovered(0)}
-        >★</span>
-      ))}
-    </span>
-  );
-}
-
-// ─── ProductDetailModal ───────────────────────────────────────────────────────
-function ProductDetailModal({ detail, onClose, user }) {
-  const [tab, setTab] = useState("info"); // info | reviews
-  const [reviewData, setReviewData] = useState(null);
-  const [loadingReviews, setLoadingReviews] = useState(false);
-  const [form, setForm] = useState({ rating: 0, title: "", comment: "" });
-  const [submitting, setSubmitting] = useState(false);
-  const [submitMsg, setSubmitMsg] = useState({ text: "", type: "" });
-  const [helpfulVoted, setHelpfulVoted] = useState({});
-
+function ProductDetailModal({ detail, onClose }) {
   if (!detail) return null;
   const { product, variants } = detail;
   const totalStock = (variants || []).reduce((sum, v) => sum + Number(v.stock || 0), 0);
   const price = variants?.[0]?.price;
 
-  const loadReviews = async () => {
-    if (!product?.id) return;
-    setLoadingReviews(true);
-    try {
-      const data = await api.get(`/api/reviews/product/${product.id}`);
-      setReviewData(data);
-    } catch (e) {
-      setReviewData({ reviews: [], stats: { total: 0, avgRating: 0, distribution: [] } });
-    } finally {
-      setLoadingReviews(false);
-    }
-  };
-
-  const handleTabChange = (t) => {
-    setTab(t);
-    if (t === "reviews" && !reviewData) loadReviews();
-  };
-
-  const handleSubmitReview = async (e) => {
-    e.preventDefault();
-    if (!user) { setSubmitMsg({ text: "Vui lòng đăng nhập để đánh giá!", type: "error" }); return; }
-    if (!form.rating) { setSubmitMsg({ text: "Vui lòng chọn số sao!", type: "error" }); return; }
-    setSubmitting(true);
-    setSubmitMsg({ text: "", type: "" });
-    try {
-      await api.post("/api/reviews", {
-        userId: user.id,
-        productId: product.id,
-        rating: form.rating,
-        title: form.title,
-        comment: form.comment
-      });
-      setSubmitMsg({ text: "Cảm ơn bạn đã đánh giá! 🎉", type: "success" });
-      setForm({ rating: 0, title: "", comment: "" });
-      await loadReviews();
-    } catch (err) {
-      setSubmitMsg({ text: err.message || "Đã xảy ra lỗi", type: "error" });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleHelpful = async (reviewId) => {
-    if (helpfulVoted[reviewId]) return;
-    try {
-      const res = await api.patch(`/api/reviews/${reviewId}/helpful`, {});
-      setHelpfulVoted(prev => ({ ...prev, [reviewId]: true }));
-      setReviewData(prev => ({
-        ...prev,
-        reviews: prev.reviews.map(r => r.id === reviewId ? { ...r, helpfulCount: res.helpfulCount } : r)
-      }));
-    } catch (e) {}
-  };
-
-  const stats = reviewData?.stats;
-  const reviews = reviewData?.reviews || [];
-  const alreadyReviewed = user && reviews.some(r => r.user?.id === user.id);
-
-  const tabBtn = (key, label) => (
-    <button
-      type="button"
-      onClick={() => handleTabChange(key)}
-      style={{ padding: "0.5rem 1.2rem", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, background: tab === key ? "#7c3aed" : "transparent", color: tab === key ? "#fff" : "#94a3b8", transition: "all 0.2s" }}
-    >{label}</button>
-  );
-
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" style={{ maxWidth: "680px", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
-          <h3 style={{ margin: 0, color: "#e2e8f0", fontSize: "1.2rem" }}>{product?.name || "Chi tiết sản phẩm"}</h3>
-          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}>✕</button>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <h3>{product?.name || "Chi tiết sản phẩm"}</h3>
+        <div className="notice">
+          Trạng thái:{" "}
+          <span className={totalStock > 0 ? "stock-tag in" : "stock-tag out"}>
+            {totalStock > 0 ? "Còn hàng" : "Hết hàng"}
+          </span>
         </div>
-
-        {/* Tab switcher */}
-        <div style={{ display: "flex", gap: "0.4rem", background: "#0f0f1a", borderRadius: "10px", padding: "4px", marginBottom: "1.2rem" }}>
-          {tabBtn("info", "📋 Thông tin")}
-          {tabBtn("reviews", `⭐ Đánh giá${stats ? ` (${stats.total})` : ""}`)}
+        <img
+          src={product?.imageUrl || "https://placehold.co/600x400/png?text=Product"}
+          alt={product?.name || "Product"}
+          style={{ width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "10px" }}
+        />
+        <p style={{ color: "#94a3b8" }}>{product?.description || "Chưa có mô tả sản phẩm."}</p>
+        <div className="summary-list">
+          <p>Giá tham khảo <span>{price ? formatVND(price) : "—"}</span></p>
+          <p>Tổng tồn kho <span>{totalStock}</span></p>
+          <p>Số biến thể <span>{variants?.length || 0}</span></p>
         </div>
-
-        {/* TAB: Info */}
-        {tab === "info" && (
-          <>
-            <div className="notice" style={{ marginBottom: "0.8rem" }}>
-              Trạng thái:{" "}
-              <span className={totalStock > 0 ? "stock-tag in" : "stock-tag out"}>
-                {totalStock > 0 ? "Còn hàng" : "Hết hàng"}
-              </span>
-            </div>
-            <img
-              src={product?.imageUrl || "https://placehold.co/600x400/png?text=Product"}
-              alt={product?.name || "Product"}
-              style={{ width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "10px", marginBottom: "1rem" }}
-            />
-            <p style={{ color: "#94a3b8", marginBottom: "1rem" }}>{product?.description || "Chưa có mô tả sản phẩm."}</p>
-            <div className="summary-list">
-              <p>Giá tham khảo <span>{price ? formatVND(price) : "—"}</span></p>
-              <p>Tổng tồn kho <span>{totalStock}</span></p>
-              <p>Số biến thể <span>{variants?.length || 0}</span></p>
-            </div>
-            {/* Variants table */}
-            {variants && variants.length > 0 && (
-              <div style={{ marginTop: "1rem" }}>
-                <h4 style={{ color: "#a78bfa", fontSize: "0.85rem", marginBottom: "0.6rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Biến thể sản phẩm</h4>
-                <div style={{ display: "grid", gridTemplateColumns: "auto auto auto auto", gap: "6px", fontSize: "0.82rem", color: "#94a3b8" }}>
-                  {["Màu", "Size", "Giá", "Tồn kho"].map(h => (
-                    <div key={h} style={{ color: "#e2e8f0", fontWeight: 600 }}>{h}</div>
-                  ))}
-                  {variants.map(v => (
-                    <React.Fragment key={v.id}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        {v.color?.hexcode && <span style={{ width: "12px", height: "12px", borderRadius: "50%", background: v.color.hexcode, display: "inline-block", border: "1px solid #444" }} />}
-                        {v.color?.name || "—"}
-                      </div>
-                      <div>{v.size?.name || "—"}</div>
-                      <div style={{ color: "#a78bfa" }}>{v.price ? formatVND(v.price) : "—"}</div>
-                      <div style={{ color: Number(v.stock) > 0 ? "#10b981" : "#ef4444" }}>{v.stock ?? 0}</div>
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.5rem" }}>
-              <button type="button" className="ghost" onClick={onClose}>Đóng</button>
-              <button type="button" className="btn-main" onClick={() => handleTabChange("reviews")}>Xem đánh giá ⭐</button>
-            </div>
-          </>
-        )}
-
-        {/* TAB: Reviews */}
-        {tab === "reviews" && (
-          <div>
-            {loadingReviews && <div style={{ textAlign: "center", padding: "2rem" }}><Spinner /></div>}
-
-            {!loadingReviews && stats && (
-              <>
-                {/* Stats Overview */}
-                <div style={{ background: "#0f0f1a", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.2rem", display: "flex", gap: "1.5rem", alignItems: "center" }}>
-                  <div style={{ textAlign: "center", minWidth: "80px" }}>
-                    <div style={{ fontSize: "2.5rem", fontWeight: 700, color: "#f59e0b" }}>{stats.avgRating || 0}</div>
-                    <StarRating value={Math.round(stats.avgRating)} readonly size="1rem" />
-                    <div style={{ color: "#6b7280", fontSize: "0.78rem", marginTop: "4px" }}>{stats.total} đánh giá</div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    {(stats.distribution || []).map(d => (
-                      <div key={d.star} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                        <span style={{ color: "#94a3b8", fontSize: "0.78rem", minWidth: "16px" }}>{d.star}</span>
-                        <span style={{ color: "#f59e0b", fontSize: "0.7rem" }}>★</span>
-                        <div style={{ flex: 1, height: "6px", background: "#1a1a2e", borderRadius: "999px", overflow: "hidden" }}>
-                          <div style={{ height: "100%", background: "#f59e0b", borderRadius: "999px", width: stats.total > 0 ? `${(d.count / stats.total) * 100}%` : "0%" }} />
-                        </div>
-                        <span style={{ color: "#6b7280", fontSize: "0.75rem", minWidth: "20px" }}>{d.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Review Form */}
-                {user && !alreadyReviewed && (
-                  <div style={{ background: "#0f0f1a", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.2rem" }}>
-                    <h4 style={{ color: "#e2e8f0", margin: "0 0 1rem", fontSize: "0.95rem" }}>✏️ Viết đánh giá của bạn</h4>
-                    <form onSubmit={handleSubmitReview} style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
-                      <div>
-                        <div style={{ color: "#94a3b8", fontSize: "0.82rem", marginBottom: "4px" }}>Số sao *</div>
-                        <StarRating value={form.rating} onChange={r => setForm(f => ({ ...f, rating: r }))} size="1.6rem" />
-                      </div>
-                      <input
-                        type="text" maxLength={100} value={form.title} placeholder="Tiêu đề (tùy chọn)"
-                        onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#1a1a2e", color: "#e2e8f0", outline: "none", fontSize: "0.9rem" }}
-                      />
-                      <textarea
-                        rows={3} maxLength={1000} value={form.comment} placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm này..."
-                        onChange={e => setForm(f => ({ ...f, comment: e.target.value }))}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#1a1a2e", color: "#e2e8f0", outline: "none", fontSize: "0.9rem", resize: "vertical" }}
-                      />
-                      {submitMsg.text && (
-                        <div style={{ padding: "0.6rem 1rem", borderRadius: "8px", background: submitMsg.type === "success" ? "#052e16" : "#450a0a", color: submitMsg.type === "success" ? "#86efac" : "#fca5a5", fontSize: "0.85rem" }}>
-                          {submitMsg.text}
-                        </div>
-                      )}
-                      <button type="submit" disabled={submitting} className="btn-main" style={{ alignSelf: "flex-start" }}>
-                        {submitting ? <Spinner /> : "📨 Gửi đánh giá"}
-                      </button>
-                    </form>
-                  </div>
-                )}
-                {user && alreadyReviewed && (
-                  <div style={{ padding: "0.8rem 1rem", background: "#052e16", borderRadius: "8px", color: "#86efac", fontSize: "0.85rem", marginBottom: "1.2rem" }}>
-                    ✅ Bạn đã đánh giá sản phẩm này rồi!
-                  </div>
-                )}
-                {!user && (
-                  <div style={{ padding: "0.8rem 1rem", background: "#1a1a2e", borderRadius: "8px", color: "#a78bfa", fontSize: "0.85rem", marginBottom: "1.2rem" }}>
-                    🔐 Đăng nhập để viết đánh giá
-                  </div>
-                )}
-
-                {/* Reviews List */}
-                {reviews.length === 0 && (
-                  <div style={{ textAlign: "center", padding: "2rem", color: "#6b7280" }}>
-                    <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>💬</div>
-                    <p>Chưa có đánh giá nào. Hãy là người đầu tiên!</p>
-                  </div>
-                )}
-                {reviews.map(r => (
-                  <div key={r.id || r._id} style={{ borderTop: "1px solid #1f2937", paddingTop: "1rem", marginBottom: "1rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", color: "#fff", fontWeight: 700 }}>
-                          {(r.user?.fullName || r.user?.username || "?")[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <div style={{ color: "#e2e8f0", fontSize: "0.9rem", fontWeight: 600 }}>{r.user?.fullName || r.user?.username || "Ẩn danh"}</div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <StarRating value={r.rating} readonly size="0.85rem" />
-                            {r.isVerifiedPurchase && (
-                              <span style={{ fontSize: "0.7rem", color: "#10b981", background: "#052e16", padding: "1px 6px", borderRadius: "999px" }}>✓ Đã mua</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <span style={{ color: "#6b7280", fontSize: "0.75rem" }}>
-                        {new Date(r.createdAt).toLocaleDateString("vi-VN")}
-                      </span>
-                    </div>
-                    {r.title && <div style={{ color: "#e2e8f0", fontWeight: 600, fontSize: "0.9rem", marginBottom: "4px" }}>{r.title}</div>}
-                    {r.comment && <p style={{ color: "#94a3b8", fontSize: "0.85rem", margin: "0 0 8px", lineHeight: 1.5 }}>{r.comment}</p>}
-                    <button
-                      type="button"
-                      onClick={() => handleHelpful(r.id || r._id)}
-                      disabled={helpfulVoted[r.id || r._id]}
-                      style={{ background: "transparent", border: "1px solid #2d2d3a", borderRadius: "6px", padding: "3px 10px", color: "#6b7280", fontSize: "0.75rem", cursor: helpfulVoted[r.id || r._id] ? "default" : "pointer" }}
-                    >
-                      👍 Hữu ích ({r.helpfulCount || 0})
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button type="button" className="ghost" onClick={onClose}>Đóng</button>
+        </div>
       </div>
     </div>
   );
@@ -2867,7 +2659,7 @@ function App() {
   const initialHash = parseHash(window.location.hash);
   const [activePage, setActivePage] = useState(() => {
     if (window.location.pathname === "/payment-result") return "payment-result";
-    return initialHash.page || "home";
+    return "home";
   });
 
   const [catalogParams, setCatalogParams] = useState({
@@ -3080,263 +2872,7 @@ function App() {
         onClose={() => setToast({ message: "", type: "" })}
       />
 
-      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} user={user} />
-      <ChatWidget />
-    </div>
-  );
-}
-
-// ─── ContactPage ──────────────────────────────────────────────────────────────
-function ContactPage() {
-  const [form, setForm] = useState({ name: "", email: "", phone: "", subject: "", message: "" });
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    // Giả lập gửi form
-    await new Promise(r => setTimeout(r, 1200));
-    setLoading(false);
-    setSubmitted(true);
-  };
-
-  const contacts = [
-    { icon: "📍", label: "Địa chỉ", value: "123 Đường Thời Trang, Q.1, TP.HCM" },
-    { icon: "📞", label: "Hotline", value: "1900 8888 (8:00 - 22:00)" },
-    { icon: "✉️", label: "Email", value: "hello@velashop.vn" },
-    { icon: "🕐", label: "Giờ mở cửa", value: "Thứ 2 – Chủ nhật: 9:00 – 22:00" },
-  ];
-
-  return (
-    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
-      {/* Hero banner */}
-      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "3rem 2rem", textAlign: "center", marginBottom: "2rem" }}>
-        <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>💌</div>
-        <h1 style={{ color: "#fff", margin: "0 0 0.5rem", fontSize: "2rem", fontWeight: 700 }}>Liên Hệ Với VELA</h1>
-        <p style={{ color: "#ddd6fe", margin: 0, fontSize: "1rem" }}>Chúng tôi luôn sẵn sàng hỗ trợ bạn 24/7</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "1.5rem" }}>
-        {/* Cột trái: Info */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {/* Contact info cards */}
-          {contacts.map(c => (
-            <div key={c.label} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.2rem 1.5rem", display: "flex", alignItems: "center", gap: "1rem" }}>
-              <div style={{ fontSize: "1.8rem", minWidth: "40px", textAlign: "center" }}>{c.icon}</div>
-              <div>
-                <div style={{ color: "#a78bfa", fontSize: "0.78rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "2px" }}>{c.label}</div>
-                <div style={{ color: "#e2e8f0", fontSize: "0.95rem" }}>{c.value}</div>
-              </div>
-            </div>
-          ))}
-
-          {/* Social links */}
-          <div style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.2rem 1.5rem" }}>
-            <div style={{ color: "#a78bfa", fontSize: "0.78rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.8rem" }}>Mạng xã hội</div>
-            <div style={{ display: "flex", gap: "0.75rem" }}>
-              {[
-                { label: "Facebook", emoji: "📘", url: "https://www.facebook.com/thai.ang.746808/?locale=vi_VN" },
-                { label: "Instagram", emoji: "📸", url: "https://www.instagram.com/dang17.4/" },
-                { label: "TikTok", emoji: "🎵", url: "https://www.tiktok.com/@thai1742004" },
-                { label: "Zalo", emoji: "💬", url: "https://zalo.me/0783321450" },
-              ].map(s => (
-                <a key={s.label} href={s.url} title={s.label} style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#2d2d3a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", textDecoration: "none", transition: "transform 0.2s" }}
-                  onMouseOver={e => e.currentTarget.style.transform = "scale(1.15)"}
-                  onMouseOut={e => e.currentTarget.style.transform = "scale(1)"}
-                >
-                  {s.emoji}
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Cột phải: Form liên hệ */}
-        <div style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "2rem" }}>
-          {submitted ? (
-            <div style={{ textAlign: "center", padding: "2rem 0" }}>
-              <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>🎉</div>
-              <h3 style={{ color: "#e2e8f0", marginBottom: "0.5rem" }}>Gửi thành công!</h3>
-              <p style={{ color: "#94a3b8" }}>Cảm ơn bạn đã liên hệ. Đội ngũ VELA sẽ phản hồi trong vòng 24 giờ.</p>
-              <button className="btn-main" style={{ marginTop: "1.5rem" }} onClick={() => { setSubmitted(false); setForm({ name: "", email: "", phone: "", subject: "", message: "" }); }}>
-                Gửi tin nhắn khác
-              </button>
-            </div>
-          ) : (
-            <>
-              <h3 style={{ color: "#e2e8f0", margin: "0 0 1.5rem", fontSize: "1.2rem" }}>✏️ Gửi Tin Nhắn</h3>
-              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
-                    Họ và tên *
-                    <input type="text" name="name" required value={form.name} onChange={handleChange} placeholder="Nguyễn Văn A"
-                      style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
-                    Số điện thoại
-                    <input type="tel" name="phone" value={form.phone} onChange={handleChange} placeholder="0909xxxxxx"
-                      style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
-                  </label>
-                </div>
-                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
-                  Email *
-                  <input type="email" name="email" required value={form.email} onChange={handleChange} placeholder="example@email.com"
-                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }} />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
-                  Chủ đề
-                  <select name="subject" value={form.subject} onChange={handleChange}
-                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem" }}>
-                    <option value="">-- Chọn chủ đề --</option>
-                    <option value="order">Hỏi về đơn hàng</option>
-                    <option value="return">Đổi / Trả hàng</option>
-                    <option value="product">Tư vấn sản phẩm</option>
-                    <option value="payment">Thanh toán</option>
-                    <option value="other">Khác</option>
-                  </select>
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: "6px", color: "#94a3b8", fontSize: "0.85rem" }}>
-                  Nội dung *
-                  <textarea name="message" required rows="4" value={form.message} onChange={handleChange} placeholder="Mô tả chi tiết vấn đề bạn gặp phải..."
-                    style={{ padding: "0.65rem 1rem", borderRadius: "8px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "0.95rem", resize: "vertical" }} />
-                </label>
-                <button type="submit" className="btn-main" disabled={loading} style={{ width: "100%", padding: "0.85rem", fontSize: "1rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", borderRadius: "10px" }}>
-                  {loading ? <Spinner /> : "📨 Gửi tin nhắn"}
-                </button>
-              </form>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Google Maps embed */}
-      <div style={{ marginTop: "1.5rem", borderRadius: "12px", overflow: "hidden", height: "280px", border: "1px solid #2d2d3a" }}>
-        <iframe
-          title="VELA Shop Location"
-          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3919.4946985938205!2d106.70143157507776!3d10.77505608938029!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x31752f40a3b49e59%3A0xa1bd14e483a602db!2zVHLGsOG7nW5nIEPDtG5nIFRo4beLxqFuZyBNYWkgVGjDumMgSOG7kyBDaMOtIE1pbmg!5e0!3m2!1svi!2svn!4v1712552000000!5m2!1svi!2svn"
-          width="100%" height="280" style={{ border: 0 }} allowFullScreen="" loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        ></iframe>
-      </div>
-
-      {/* FAQ nhanh */}
-      <div style={{ marginTop: "1.5rem" }}>
-        <h2 style={{ color: "#e2e8f0", fontSize: "1.2rem", marginBottom: "1rem" }}>❓ Câu Hỏi Thường Gặp</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-          {[
-            { q: "Thời gian giao hàng bao lâu?", a: "Thông thường 2–4 ngày làm việc trong TP.HCM và 3–7 ngày tỉnh thành khác." },
-            { q: "Cách đổi trả hàng thế nào?", a: "Miễn phí đổi trả trong vòng 7 ngày kể từ ngày nhận hàng, hàng còn nguyên tem, chưa giặt." },
-            { q: "Thanh toán có những cách nào?", a: "VELA hỗ trợ MoMo, COD và sẽ mở rộng thêm VNPay, thẻ ngân hàng trong thời gian tới." },
-            { q: "Size guide hướng dẫn ở đâu?", a: "Mỗi trang sản phẩm đều có bảng size chi tiết. Chatbot AI của VELA cũng có thể tư vấn size cho bạn!" },
-          ].map(item => (
-            <div key={item.q} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "10px", padding: "1.2rem" }}>
-              <div style={{ color: "#a78bfa", fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.4rem" }}>{item.q}</div>
-              <div style={{ color: "#94a3b8", fontSize: "0.85rem", lineHeight: 1.5 }}>{item.a}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── ChatWidget ────────────────────────────────────────────────────────────────
-function ChatWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: "Xin chào! Tôi có thể giúp gì cho bạn hôm nay?" }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const messagesEndRef = React.useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => { scrollToBottom() }, [messages, isOpen]);
-
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
-
-    const userMessage = { role: "user", text: input.trim() };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInput("");
-    setLoading(true);
-
-    try {
-      // Gửi history (trừ message cuối) và userMessage
-      const history = messages.map(m => ({ role: m.role, text: m.text }));
-      const { reply, error } = await api.post("/api/chatbot", {
-        message: userMessage.text,
-        history: history
-      });
-
-      if (error) throw new Error(error);
-
-      setMessages([...newMessages, { role: "assistant", text: reply || "Không có phản hồi." }]);
-    } catch (err) {
-      setMessages([...newMessages, { role: "assistant", text: "Xin lỗi, lỗi khi kết nối AI: " + err.message }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ position: "fixed", bottom: "20px", right: "20px", zIndex: 9999 }}>
-      {!isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          style={{ width: "60px", height: "60px", borderRadius: "50%", background: "#7c3aed", color: "#fff", border: "none", fontSize: "24px", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
-          💬
-        </button>
-      )}
-
-      {isOpen && (
-        <div style={{ width: "350px", height: "500px", background: "#1a1a2e", borderRadius: "12px", display: "flex", flexDirection: "column", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden", border: "1px solid #2d2d3a" }}>
-          <div style={{ padding: "15px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>🤖 VELA Assistant</h3>
-            <button onClick={() => setIsOpen(false)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: "18px", cursor: "pointer" }}>✖</button>
-          </div>
-
-          <div style={{ flex: 1, padding: "15px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", background: "#0f0f1a" }}>
-            {messages.map((msg, idx) => (
-              <div key={idx} style={{ alignSelf: msg.role === "user" ? "flex-end" : "flex-start", maxWidth: "80%" }}>
-                <div style={{ background: msg.role === "user" ? "#7c3aed" : "#2d2d3a", color: "#fff", padding: "10px 14px", borderRadius: msg.role === "user" ? "18px 18px 0 18px" : "18px 18px 18px 0", fontSize: "14px", lineHeight: "1.4", wordBreak: "break-word" }}>
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div style={{ alignSelf: "flex-start" }}>
-                <div style={{ background: "#2d2d3a", padding: "10px 14px", borderRadius: "18px 18px 18px 0", fontSize: "14px", color: "#a78bfa" }}>
-                  Đang thu thập thông tin...
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          <form onSubmit={handleSend} style={{ display: "flex", padding: "10px", background: "#1a1a2e", borderTop: "1px solid #2d2d3a" }}>
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Nhập câu hỏi..."
-              style={{ flex: 1, padding: "10px", borderRadius: "20px", border: "1px solid #2d2d3a", background: "#0f0f1a", color: "#e2e8f0", outline: "none", fontSize: "14px" }}
-            />
-            <button type="submit" disabled={loading || !input.trim()} style={{ marginLeft: "8px", width: "40px", height: "40px", borderRadius: "50%", background: "#7c3aed", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              ➤
-            </button>
-          </form>
-        </div>
-      )}
+      <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} />
     </div>
   );
 }
