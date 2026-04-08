@@ -2,6 +2,8 @@ import User from "../models/user.model.js";
 import Role from "../models/role.model.js";
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import createError from "http-errors";
+import { OAuth2Client } from "google-auth-library";
+import crypto from "crypto";
 
 // Helper: format user object cho frontend
 const formatUser = (user) => ({
@@ -13,6 +15,84 @@ const formatUser = (user) => ({
     avatarUrl: user.avatarUrl || "",
     role: user.role ? { code: user.role.code, name: user.role.name } : null
 });
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+const generateUniqueUsername = async (base) => {
+    let normalized = base.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!normalized) normalized = "user";
+    let username = normalized;
+    let suffix = 1;
+    while (await User.findOne({ username })) {
+        username = `${normalized}${suffix}`;
+        suffix += 1;
+    }
+    return username;
+};
+
+const verifyGoogleIdToken = async (idToken) => {
+    const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    return ticket.getPayload();
+};
+
+const googleLogin = async ({ idToken }) => {
+    if (!idToken) throw createError.BadRequest("Google ID token không được để trống");
+    const payload = await verifyGoogleIdToken(idToken);
+    const email = payload?.email;
+    const emailVerified = payload?.email_verified;
+    const fullName = payload?.name || "";
+    const avatarUrl = payload?.picture || "";
+
+    if (!email || !emailVerified) {
+        throw createError.Unauthorized("Email Google chưa được xác thực");
+    }
+
+    let user = await User.findOne({ email: email.toLowerCase() }).populate("role");
+    if (!user) {
+        const usernameBase = (email.split("@")[0] || "googleuser");
+        const username = await generateUniqueUsername(usernameBase);
+
+        let userRole = await Role.findOne({ code: "USER" });
+        if (!userRole) {
+            userRole = await Role.create({ code: "USER", name: "User" });
+        }
+
+        const password = crypto.randomBytes(16).toString("hex");
+        const newUser = await User.create({
+            username,
+            email: email.toLowerCase(),
+            password,
+            fullName,
+            avatarUrl,
+            role: userRole._id
+        });
+        user = await User.findById(newUser._id).populate("role");
+    }
+
+    if (!user.isActive) {
+        throw createError.Forbidden("Tài khoản đã bị vô hiệu hóa");
+    }
+    if (user.isDeleted) {
+        throw createError.Forbidden("Tài khoản đã bị xóa");
+    }
+
+    const accessToken = generateAccessToken({
+        userId: user._id,
+        role: user.role ? user.role.code : "USER"
+    });
+    const refreshToken = generateRefreshToken({
+        userId: user._id,
+        role: user.role ? user.role.code : "USER"
+    });
+
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    return { user: formatUser(user), accessToken, refreshToken, message: "Đăng nhập bằng Google thành công" };
+};
 
 const register = async ({ username, email, password, fullName, phone }) => {
     if (!username) throw createError.BadRequest("Tên đăng nhập không được để trống");
@@ -133,4 +213,4 @@ const logout = async (userId) => {
     return { message: "Đăng xuất thành công" };
 };
 
-export default { register, login, refreshTokenService, logout, formatUser };
+export default { register, login, refreshTokenService, logout, formatUser, googleLogin };

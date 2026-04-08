@@ -11,6 +11,9 @@ router.post("/register", limiter, authController.register);
 // POST /api/auth/login
 router.post("/login", limiter, authController.login);
 
+// POST /api/auth/google
+router.post("/google", limiter, authController.googleLogin);
+
 // POST /api/auth/refresh-token
 router.post("/refresh-token", limiter, authController.refreshToken);
 

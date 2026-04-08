@@ -1,4 +1,4 @@
-const { useEffect, useState, useCallback } = React;
+const { useEffect, useState, useCallback, useRef } = React;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const pages = [
@@ -12,6 +12,25 @@ const categories = ["Women", "Men", "Street", "Office", "Accessories", "Sale"];
 const sizes = ["XS", "S", "M", "L", "XL"];
 const colors = ["Black", "Ivory", "Stone", "Denim", "Olive"];
 const sortOptions = ["Newest", "Price: Low to High", "Price: High to Low", "Best Sellers"];
+
+const parseHash = (hash) => {
+  const raw = hash?.startsWith("#") ? hash.slice(1) : hash || "";
+  const [pagePart = "", queryString = ""] = raw.split("?");
+  const params = new URLSearchParams(queryString);
+  return {
+    page: pagePart || "home",
+    promo: params.get("promo") || "",
+    category: params.get("category") || "",
+    search: params.get("search") || "",
+  };
+};
+
+const buildHash = (page, params = {}) => {
+  const search = new URLSearchParams(params);
+  const paramStr = search.toString();
+  const baseHash = page || "home";
+  return baseHash + (paramStr ? `?${paramStr}` : "");
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const formatVND = (amount) =>
@@ -36,6 +55,7 @@ const parseResponse = async (r) => {
 };
 
 const BASE_URL = "http://127.0.0.1:3000";
+const GOOGLE_CLIENT_ID = "908102538508-8d4man9rvnc1s8u6ardainq2fu6c2req.apps.googleusercontent.com";
 
 const api = {
   get: (url) => fetch(BASE_URL + url).then(parseResponse),
@@ -208,25 +228,45 @@ function HomePage({ products, variants, onAddToCart, user, onNavigate, onViewDet
 
       <article className="category-strip">
         {categories.map((item) => (
-          <button key={item} type="button" className="chip" onClick={() => onNavigate("catalog")}>
+          <button key={item} type="button" className="chip" onClick={() => onNavigate("catalog", { category: item })}>
             {item}
           </button>
         ))}
       </article>
 
       <article className="promo-grid">
-        <div className="promo-card" style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)" }}>
+        <button
+          type="button"
+          className="promo-card"
+          style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)" }}
+          onClick={() => onNavigate("catalog", { promo: "flash-sale" })}
+        >
           ⚡ Flash Sale
-        </div>
-        <div className="promo-card" style={{ background: "linear-gradient(135deg, #0ea5e9, #2563eb)" }}>
+        </button>
+        <button
+          type="button"
+          className="promo-card"
+          style={{ background: "linear-gradient(135deg, #0ea5e9, #2563eb)" }}
+          onClick={() => onNavigate("catalog", { promo: "top-rated" })}
+        >
           ⭐ Top Rated
-        </div>
-        <div className="promo-card" style={{ background: "linear-gradient(135deg, #10b981, #059669)" }}>
+        </button>
+        <button
+          type="button"
+          className="promo-card"
+          style={{ background: "linear-gradient(135deg, #10b981, #059669)" }}
+          onClick={() => onNavigate("catalog", { promo: "new-in" })}
+        >
           🆕 New In
-        </div>
-        <div className="promo-card" style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)" }}>
+        </button>
+        <button
+          type="button"
+          className="promo-card"
+          style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)" }}
+          onClick={() => onNavigate("catalog", { promo: "bundle-deals" })}
+        >
           🎁 Bundle Deals
-        </div>
+        </button>
       </article>
 
       <h2 style={{ padding: "1rem 0 0.5rem", color: "#e2e8f0" }}>Sản phẩm nổi bật</h2>
@@ -256,12 +296,19 @@ function HomePage({ products, variants, onAddToCart, user, onNavigate, onViewDet
 }
 
 // ─── CatalogPage ──────────────────────────────────────────────────────────────
-function CatalogPage({ products, variants, onAddToCart, user, onNavigate, onViewDetail }) {
-  const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
+function CatalogPage({ products, variants, onAddToCart, user, onNavigate, onViewDetail, initialPromo = "", initialCategory = "", initialSearch = "" }) {
+  const [search, setSearch] = useState(initialSearch);
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [stockFilter, setStockFilter] = useState("all"); // all | in | out
+  const [promo, setPromo] = useState(initialPromo);
+
+  useEffect(() => {
+    setSearch(initialSearch);
+    setSelectedCategory(initialCategory);
+    setPromo(initialPromo);
+  }, [initialSearch, initialCategory, initialPromo]);
 
   const filtered = products.filter((p) => {
     const matchSearch = !search || p.name?.toLowerCase().includes(search.toLowerCase());
@@ -284,8 +331,36 @@ function CatalogPage({ products, variants, onAddToCart, user, onNavigate, onView
     return matchSearch && matchCat && hasMatchingVariant && matchStock;
   });
 
+  const promoLabel = promo === "flash-sale" ? "Flash Sale" : promo === "top-rated" ? "Top Rated" : promo === "new-in" ? "New In" : promo === "bundle-deals" ? "Bundle Deals" : "";
+
+  const filteredWithPromo = filtered.filter((p) => {
+    if (promo === "flash-sale") {
+      return p.category?.name === "Sale" || p.category?.name === "Accessories";
+    }
+    if (promo === "bundle-deals") {
+      const variantPrices = variants
+        .filter((v) => v.product?.id === p.id)
+        .map((v) => Number(v.price || 0));
+      const minPrice = Math.min(...variantPrices, Infinity);
+      return minPrice > 0 && minPrice <= 300000;
+    }
+    return true;
+  });
+
+  const sorted = [...filteredWithPromo];
+  if (promo === "new-in") {
+    sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  const productsToShow = promo === "top-rated" ? sorted.slice(0, 12) : sorted;
+
   return (
     <section className="panel">
+      {promoLabel && (
+        <div className="notice info" style={{ marginBottom: "1rem" }}>
+          Đang xem: <strong>{promoLabel}</strong>
+        </div>
+      )}
       <div className="toolbar">
         <input
           type="search"
@@ -313,7 +388,7 @@ function CatalogPage({ products, variants, onAddToCart, user, onNavigate, onView
       </div>
 
       <div className="product-grid">
-        {filtered.map((p) => (
+        {productsToShow.map((p) => (
           <ProductCard
             key={p.id}
             product={p}
@@ -324,7 +399,7 @@ function CatalogPage({ products, variants, onAddToCart, user, onNavigate, onView
             onViewDetail={onViewDetail}
           />
         ))}
-        {filtered.length === 0 && (
+        {productsToShow.length === 0 && (
           <div className="notice" style={{ gridColumn: "1/-1" }}>
             Không tìm thấy sản phẩm nào.
           </div>
@@ -846,10 +921,10 @@ function PaymentResultPage({ onNavigate }) {
         )}
 
         <div className="result-actions">
-          <button className="btn-main" type="button" onClick={() => { window.history.replaceState({}, "", "/"); onNavigate("orders"); }}>
+          <button className="btn-main" type="button" onClick={() => { window.location.hash = "orders"; }}>
             Xem đơn hàng của tôi
           </button>
-          <button className="ghost" type="button" onClick={() => { window.history.replaceState({}, "", "/"); onNavigate("home"); }}>
+          <button className="ghost" type="button" onClick={() => { window.location.hash = ""; }}>
             Tiếp tục mua sắm
           </button>
         </div>
@@ -1000,6 +1075,48 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState({ text: "", type: "" });
+  const googleButtonRef = useRef(null);
+
+  const handleGoogleCredentialResponse = async (response) => {
+    if (!response?.credential) {
+      setMessage({ text: "Không nhận được thông tin Google.", type: "error" });
+      return;
+    }
+    setLoading(true);
+    setMessage({ text: "", type: "" });
+    try {
+      const res = await fetch(BASE_URL + "/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: response.credential })
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        setMessage({ text: "Đăng nhập Google thành công!", type: "success" });
+        onLogin(data.user);
+      } else {
+        setMessage({ text: data.error || "Đăng nhập Google thất bại", type: "error" });
+      }
+    } catch (err) {
+      setMessage({ text: "Lỗi: " + err.message, type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLogin || !googleButtonRef.current || !window.google?.accounts?.id) return;
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredentialResponse,
+      ux_mode: "popup"
+    });
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      text: "signin_with"
+    });
+  }, [isLogin]);
 
   useEffect(() => {
     if (user) {
@@ -1351,6 +1468,11 @@ function AccountPage({ user, onLogin, onLogout, onRegister }) {
             Mật khẩu
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
           </label>
+          {isLogin && (
+            <div style={{ margin: "1rem 0" }}>
+              <div ref={googleButtonRef} />
+            </div>
+          )}
           {!isLogin && (
             <>
               <label>
@@ -2293,7 +2415,24 @@ function AdminPage({ onToast }) {
 }
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
-function Footer() {
+function Footer({ onNavigate }) {
+  const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [newsletterMessage, setNewsletterMessage] = useState("");
+
+  const handleSubscribe = () => {
+    const email = newsletterEmail.trim();
+    if (!email) {
+      setNewsletterMessage("Vui lòng nhập email để đăng ký.");
+      return;
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setNewsletterMessage("Email không hợp lệ. Vui lòng kiểm tra lại.");
+      return;
+    }
+    setNewsletterMessage("Cảm ơn bạn đã đăng ký nhận tin! 🎉");
+    setNewsletterEmail("");
+  };
+
   return (
     <footer className="footer">
       <div>
@@ -2302,27 +2441,141 @@ function Footer() {
       </div>
       <div>
         <h5>Thông tin</h5>
-        <a href="#">Về chúng tôi</a>
-        <a href="#">Hướng dẫn size</a>
-        <a href="#">Chính sách vận chuyển</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("about"); }}>Về chúng tôi</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("size-guide"); }}>Hướng dẫn size</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("shipping-policy"); }}>Chính sách vận chuyển</a>
       </div>
       <div>
         <h5>Hỗ trợ</h5>
-        <a href="#">Liên hệ</a>
-        <a href="#">FAQ</a>
-        <a href="#">Đổi trả hàng</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("contact"); }}>Liên hệ</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("faq"); }}>FAQ</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("returns"); }}>Đổi trả hàng</a>
       </div>
       <div>
         <h5>Đăng ký nhận tin</h5>
         <div className="newsletter">
-          <input type="email" placeholder="Email của bạn" />
-          <button type="button" className="btn-main">Đăng ký</button>
+          <input
+            type="email"
+            value={newsletterEmail}
+            onChange={(e) => { setNewsletterMessage(""); setNewsletterEmail(e.target.value); }}
+            placeholder="Email của bạn"
+          />
+          <button type="button" className="btn-main" onClick={handleSubscribe}>Đăng ký</button>
         </div>
+        {newsletterMessage && (
+          <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#a78bfa" }}>
+            {newsletterMessage}
+          </p>
+        )}
         <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#6b7280" }}>
           💜 Thanh toán an toàn với MoMo
         </p>
       </div>
     </footer>
+  );
+}
+
+function InfoPage({ title, subtitle, blocks }) {
+  return (
+    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
+      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "2rem", color: "#fff", marginBottom: "2rem" }}>
+        <h1 style={{ margin: 0, fontSize: "2rem", fontWeight: 700 }}>{title}</h1>
+        <p style={{ margin: "0.75rem 0 0", color: "#d8b4fe", fontSize: "1rem" }}>{subtitle}</p>
+      </div>
+      <div style={{ display: "grid", gap: "1.25rem" }}>
+        {blocks.map((block, index) => (
+          <div key={index} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.5rem" }}>
+            <h2 style={{ margin: 0, marginBottom: "0.75rem", fontSize: "1.1rem" }}>{block.heading}</h2>
+            {Array.isArray(block.content) ? (
+              <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                {block.content.map((item, idx) => (
+                  <li key={idx} style={{ marginBottom: "0.5rem", color: "#e2e8f0" }}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ margin: 0, color: "#e2e8f0" }}>{block.content}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AboutPage() {
+  return (
+    <InfoPage
+      title="Về chúng tôi"
+      subtitle="VELA đem đến trải nghiệm thời trang hiện đại, chất lượng và thân thiện với người dùng."
+      blocks={[
+        { heading: "Sứ mệnh", content: "Mang đến phong cách thời trang tiện nghi và tinh tế cho mọi khách hàng, với sản phẩm chất lượng và dịch vụ tận tâm." },
+        { heading: "Giá trị cốt lõi", content: ["Chất lượng cao", "Thiết kế hợp thời", "Dịch vụ khách hàng tận tâm", "Giao hàng nhanh chóng và an toàn"] },
+        { heading: "Cam kết", content: "Chúng tôi luôn nỗ lực để đảm bảo sản phẩm đúng mô tả, quy trình đặt hàng an toàn và hỗ trợ khách hàng nhanh chóng." },
+      ]}
+    />
+  );
+}
+
+function SizeGuidePage() {
+  return (
+    <InfoPage
+      title="Hướng dẫn size"
+      subtitle="Chọn size phù hợp giúp bạn mặc vừa vặn và tự tin hơn."
+      blocks={[
+        { heading: "Bảng quy đổi cơ bản", content: ["XS: Vòng ngực 78-82 cm", "S: Vòng ngực 83-87 cm", "M: Vòng ngực 88-92 cm", "L: Vòng ngực 93-97 cm", "XL: Vòng ngực 98-102 cm"] },
+        { heading: "Lưu ý khi đo", content: ["Đo ngang vòng ngực ở phần rộng nhất", "Đo vòng eo tại điểm nhỏ nhất", "Đo vòng mông tại điểm rộng nhất", "So sánh với bảng size của sản phẩm để chọn chuẩn nhất"] },
+      ]}
+    />
+  );
+}
+
+function ShippingPolicyPage() {
+  return (
+    <InfoPage
+      title="Chính sách vận chuyển"
+      subtitle="Mọi đơn hàng được khởi tạo nhanh chóng và giao đến tay bạn an toàn."
+      blocks={[
+        { heading: "Thời gian giao hàng", content: "Đơn hàng sẽ được xử lý trong vòng 24 giờ làm việc và giao trong 2-5 ngày làm việc tuỳ khu vực." },
+        { heading: "Phí vận chuyển", content: ["Miễn phí cho đơn hàng từ 999k", "Đơn dưới 999k chịu phí vận chuyển theo danh mục sản phẩm", "Phí chuyển phát có thể thay đổi khi có khuyến mãi"] },
+        { heading: "Theo dõi đơn hàng", content: "Bạn có thể theo dõi trạng thái đơn hàng qua email hoặc trang quản lý đơn hàng sau khi đăng nhập." },
+      ]}
+    />
+  );
+}
+
+function FAQPage() {
+  return (
+    <section className="panel" style={{ maxWidth: "1100px", margin: "0 auto" }}>
+      <div style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", borderRadius: "16px", padding: "2rem", color: "#fff", marginBottom: "2rem" }}>
+        <h1 style={{ margin: 0, fontSize: "2rem", fontWeight: 700 }}>FAQ</h1>
+        <p style={{ margin: "0.75rem 0 0", color: "#d8b4fe", fontSize: "1rem" }}>Câu hỏi thường gặp về đặt hàng, vận chuyển và đổi trả.</p>
+      </div>
+      <div style={{ display: "grid", gap: "1rem" }}>
+        {[
+          { question: "Làm sao để đặt hàng?", answer: "Chọn sản phẩm, thêm vào giỏ, đi tới trang thanh toán và hoàn tất thông tin vận chuyển." },
+          { question: "Thời gian xử lý đơn hàng là bao lâu?", answer: "Đơn hàng được xử lý trong vòng 24 giờ làm việc kể từ khi xác nhận thanh toán." },
+          { question: "Tôi có thể trả hàng không?", answer: "Có, bạn có thể đổi trả trong vòng 7 ngày kể từ khi nhận hàng, theo điều kiện sản phẩm còn nguyên vẹn." },
+        ].map((item, index) => (
+          <div key={index} style={{ background: "var(--card, #1a1a2e)", border: "1px solid #2d2d3a", borderRadius: "12px", padding: "1.5rem" }}>
+            <h2 style={{ margin: 0, marginBottom: "0.75rem", fontSize: "1.05rem" }}>{item.question}</h2>
+            <p style={{ margin: 0, color: "#e2e8f0" }}>{item.answer}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReturnsPage() {
+  return (
+    <InfoPage
+      title="Đổi trả hàng"
+      subtitle="Chúng tôi hỗ trợ đổi trả nhanh chóng khi sản phẩm không vừa ý hoặc gặp lỗi." 
+      blocks={[
+        { heading: "Điều kiện đổi trả", content: ["Sản phẩm còn nguyên tem mác, chưa qua sử dụng", "Giữ hóa đơn hoặc mã đơn hàng", "Thông báo đổi trả trong vòng 7 ngày kể từ ngày nhận hàng"] },
+        { heading: "Quy trình", content: ["Liên hệ với bộ phận chăm sóc khách hàng", "Gửi hình ảnh sản phẩm nếu có lỗi", "Chúng tôi sẽ hướng dẫn đổi trả và hoàn tiền nhanh nhất"] },
+      ]}
+    />
   );
 }
 
@@ -2611,11 +2864,32 @@ function ProductDetailModal({ detail, onClose, user }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
+  const initialHash = parseHash(window.location.hash);
   const [activePage, setActivePage] = useState(() => {
-    // If redirected from MoMo, show payment result
     if (window.location.pathname === "/payment-result") return "payment-result";
-    return "home";
+    return initialHash.page || "home";
   });
+
+  const [catalogParams, setCatalogParams] = useState({
+    promo: initialHash.promo,
+    category: initialHash.category,
+    search: initialHash.search,
+  });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const parsed = parseHash(window.location.hash);
+      console.log("Hash changed:", { hash: window.location.hash, parsed });
+      setActivePage(parsed.page);
+      if (parsed.page === "catalog") {
+        setCatalogParams({ promo: parsed.promo, category: parsed.category, search: parsed.search });
+      } else {
+        setCatalogParams({ promo: "", category: "", search: "" });
+      }
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   const [user, setUser] = useState(() => {
     try {
@@ -2629,17 +2903,21 @@ function App() {
   const [products, setProducts] = useState([]);
   const [variants, setVariants] = useState([]);
   const [detailProduct, setDetailProduct] = useState(null);
+  const [dataFetched, setDataFetched] = useState(false);
 
+  // Fetch products & variants ONCE on mount
   useEffect(() => {
-    if (activePage === "home" || activePage === "catalog") {
-      api.get("/api/products")
-        .then(data => setProducts(Array.isArray(data) ? data : []))
-        .catch(() => setProducts([]));
-      api.get("/api/product-variants")
-        .then(data => setVariants(Array.isArray(data) ? data : []))
-        .catch(() => setVariants([]));
-    }
-  }, [activePage]);
+    if (dataFetched) return;
+    setDataFetched(true);
+    
+    Promise.all([
+      api.get("/api/products").catch(() => []),
+      api.get("/api/product-variants").catch(() => [])
+    ]).then(([productsData, variantsData]) => {
+      setProducts(Array.isArray(productsData) ? productsData : []);
+      setVariants(Array.isArray(variantsData) ? variantsData : []);
+    });
+  }, [dataFetched]);
 
   // Load cart count
   useEffect(() => {
@@ -2652,7 +2930,7 @@ function App() {
   const handleLogin = (loggedInUser) => {
     setUser(loggedInUser);
     localStorage.setItem("currentUser", JSON.stringify(loggedInUser));
-    setActivePage("home");
+    navigate("home");
     showToast("Đăng nhập thành công! Chào " + (loggedInUser.fullName || loggedInUser.username), "success");
   };
 
@@ -2661,13 +2939,14 @@ function App() {
     setCartCount(0);
     localStorage.removeItem("currentUser");
     showToast("Đã đăng xuất", "info");
+    navigate("home");
   };
 
   const showToast = (message, type = "info") => setToast({ message, type });
 
   const addToCart = async (variantId, qty = 1) => {
     if (!user) {
-      setActivePage("account");
+      navigate("account");
       return;
     }
     try {
@@ -2683,7 +2962,13 @@ function App() {
     }
   };
 
-  const navigate = (page) => setActivePage(page);
+  const navigate = (page, options = {}) => {
+    const promo = options.promo || "";
+    const category = options.category || "";
+    const search = options.search || "";
+    const targetHash = buildHash(page, page === "catalog" ? { promo, category, search } : {});
+    window.location.hash = targetHash;
+  };
   const openDetail = (product, productVariants) => setDetailProduct({ product, variants: productVariants || [] });
 
   const renderPage = () => {
@@ -2708,7 +2993,7 @@ function App() {
 
     switch (activePage) {
       case "home": return <HomePage products={products} variants={variants} onAddToCart={addToCart} user={user} onNavigate={navigate} onViewDetail={openDetail} />;
-      case "catalog": return <CatalogPage products={products} variants={variants} onAddToCart={addToCart} user={user} onNavigate={navigate} onViewDetail={openDetail} />;
+      case "catalog": return <CatalogPage products={products} variants={variants} onAddToCart={addToCart} user={user} onNavigate={navigate} onViewDetail={openDetail} initialPromo={catalogParams.promo} initialCategory={catalogParams.category} initialSearch={catalogParams.search} />;
       case "cart": return <CartPage user={user} cartCount={cartCount} setCartCount={setCartCount} onNavigate={navigate} />;
       case "checkout": return <CheckoutPage user={user} onNavigate={navigate} />;
       case "orders": return <OrdersPage user={user} onNavigate={navigate} />;
@@ -2716,6 +3001,11 @@ function App() {
       case "admin": return <AdminPage onToast={showToast} />;
       case "payment-result": return <PaymentResultPage onNavigate={navigate} />;
       case "contact": return <ContactPage />;
+      case "about": return <AboutPage />;
+      case "size-guide": return <SizeGuidePage />;
+      case "shipping-policy": return <ShippingPolicyPage />;
+      case "faq": return <FAQPage />;
+      case "returns": return <ReturnsPage />;
       default: return <HomePage products={products} variants={variants} onAddToCart={addToCart} user={user} onNavigate={navigate} onViewDetail={openDetail} />;
     }
   };
@@ -2782,7 +3072,7 @@ function App() {
 
       <main className="main">{renderPage()}</main>
 
-      <Footer />
+      <Footer onNavigate={navigate} />
 
       <Toast
         message={toast.message}
