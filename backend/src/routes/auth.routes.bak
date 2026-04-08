@@ -1,0 +1,26 @@
+import { Router } from "express";
+import authController from "../controllers/auth.controller.js";
+import { registerSchema, loginSchema, refreshTokenSchema } from "../validations/auth.validation.js";
+import { limiter } from "../middlewares/rateLimit.middleware.js";
+import authenticate from "../middlewares/auth.middleware.js";
+
+// Validate middleware if needed, but since it's missing in imports, I'll add a dummy or import it.
+// Wait, looking at the previous view_file, `validate` is not imported, which might cause ReferenceError if used!
+// Let me look at line 10 in previous auth.routes.js:
+// `import { registerSchema, loginSchema, refreshTokenSchema } from "../validations/auth.validation.js";`
+// ... and `validate` ?? No `validate` middleware. If `validate` is missing, it will crash. Let me see how validate is imported elsewhere or skip validate middleware if it wasn't there.
+// Actually, earlier view_file for `auth.routes.js`:
+/*
+1: import { Router } from "express";
+2: import authController from "../controllers/auth.controller.js";
+3: import { registerSchema, loginSchema, refreshTokenSchema } from "../validations/auth.validation.js";
+4: import { limiter } from "../middlewares/rateLimit.middleware.js";
+5: import authenticate from "../middlewares/auth.middleware.js";
+6: 
+7: const router = Router();
+8: 
+9: // POST /api/auth/register
+10: router.post("/register", limiter, validate(registerSchema), authController.register);
+...
+*/
+// Let's import validate middleware. I'll read auth.routes.js again.

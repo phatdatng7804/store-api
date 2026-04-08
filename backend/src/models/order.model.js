@@ -1,27 +1,61 @@
 import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema({
-    user:{
+    user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        required: true
     },
-    shippingAddress:{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "UserAddress",
+    receiverName: {
+        type: String,
+        trim: true
     },
-    totalAmount:{
+    receiverPhone: {
+        type: String,
+        trim: true
+    },
+    shippingAddress: {
+        type: String,
+        trim: true
+    },
+    note: {
+        type: String,
+        trim: true
+    },
+    totalAmount: {
         type: Number,
         required: true
     },
-    status:{
-        type: String,
-        enum: ["pending", "shipped", "delivered", "cancelled"],
-        default: "pending"
+    finalAmount: {
+        type: Number,
+        required: true
     },
-    note:{
+    couponCode: {
         type: String,
-        trim: true
+        default: ""
+    },
+    discountAmount: {
+        type: Number,
+        default: 0
+    },
+    status: {
+        type: String,
+        enum: ["PENDING", "PAID", "FAILED", "CANCELLED"],
+        default: "PENDING"
+    },
+    paymentMethod: {
+        type: String,
+        enum: ["COD", "MOMO"],
+        default: "COD"
+    },
+    momoOrderId: {
+        type: String,
+        default: ""
+    },
+    momoTransId: {
+        type: String,
+        default: ""
     }
-}, {timestamps: true})
+}, { timestamps: true });
 
 export default mongoose.model("Order", orderSchema);

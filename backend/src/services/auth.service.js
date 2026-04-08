@@ -1,56 +1,136 @@
 import User from "../models/user.model.js";
 import Role from "../models/role.model.js";
-import { generateToken } from "../utils/jwt.js";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import createError from "http-errors";
 
-const register = async ({ name, email, password, role }) => {
-    // 1. Kiểm tra email đã tồn tại chưa
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-        throw createError.Conflict("Email đã được sử dụng");
-    }
-    // 2. Tìm role theo tên (mặc định "user" nếu không truyền)
-    const roleName = role || "user";
-    const foundRole = await Role.findOne({ name: roleName });
-    if (!foundRole) {
-        throw createError.BadRequest(`Role "${roleName}" không tồn tại`);
-    }
-    // 3. Tạo user (password tự động hash qua pre-save hook)
-    const newUser = await User.create({
-        name,
-        email,
-        password,
-        role: foundRole._id
-    });
-    // 4. Trả về user (ẩn password), KHÔNG trả token
-    const userResponse = newUser.toObject();
-    delete userResponse.password;
+// Helper: format user object cho frontend
+const formatUser = (user) => ({
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    fullName: user.fullName || "",
+    phone: user.phone || "",
+    avatarUrl: user.avatarUrl || "",
+    role: user.role ? { code: user.role.code, name: user.role.name } : null
+});
 
-    return { user: userResponse };
+const register = async ({ username, email, password, fullName, phone }) => {
+    if (!username) throw createError.BadRequest("Tên đăng nhập không được để trống");
+    if (!email) throw createError.BadRequest("Email không được để trống");
+    if (!password) throw createError.BadRequest("Mật khẩu không được để trống");
+
+    const existingUsername = await User.findOne({ username: username.toLowerCase() });
+    if (existingUsername) throw createError.Conflict("Tên đăng nhập đã tồn tại");
+
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) throw createError.Conflict("Email đã được sử dụng");
+
+    // Find USER role
+    let userRole = await Role.findOne({ code: "USER" });
+    if (!userRole) {
+        userRole = await Role.create({ code: "USER", name: "User" });
+    }
+
+    const newUser = await User.create({
+        username: username.toLowerCase(),
+        email: email.toLowerCase(),
+        password,
+        fullName: fullName || "",
+        phone: phone || "",
+        role: userRole._id
+    });
+    
+    const populated = await User.findById(newUser._id).populate("role");
+    return { user: formatUser(populated), message: "Đăng ký thành công" };
 };
 
-const login = async ({ email, password }) => {
-    // 1. Tìm user theo email, populate role để lấy tên role
-    const user = await User.findOne({ email }).populate("role", "name");
+const login = async ({ username, email, password }) => {
+    if (!password) throw createError.BadRequest("Vui lòng nhập mật khẩu");
+    if (!username && !email) throw createError.BadRequest("Vui lòng nhập tên đăng nhập hoặc email");
+
+    const query = username ? { username: username.toLowerCase() } : { email: email.toLowerCase() };
+    const user = await User.findOne(query).populate("role");
+    
     if (!user) {
-        throw createError.Unauthorized("Email hoặc mật khẩu không đúng");
+        throw createError.Unauthorized("Thông tin đăng nhập không đúng");
     }
-    // 2. So sánh password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-        throw createError.Unauthorized("Email hoặc mật khẩu không đúng");
+        throw createError.Unauthorized("Thông tin đăng nhập không đúng");
     }
-    // 3. Kiểm tra tài khoản có active không
     if (!user.isActive) {
         throw createError.Forbidden("Tài khoản đã bị vô hiệu hóa");
     }
-    // 4. Tạo JWT token
-    const token = generateToken({
+    if (user.isDeleted) {
+        throw createError.Forbidden("Tài khoản đã bị xóa");
+    }
+    
+    // Tạo access token và refresh token
+    const accessToken = generateAccessToken({
         userId: user._id,
-        role: user.role.name
+        role: user.role ? user.role.code : "USER"
     });
-    // 5. Chỉ trả token
-    return { token };
+    
+    const refreshToken = generateRefreshToken({
+        userId: user._id,
+        role: user.role ? user.role.code : "USER"
+    });
+
+    // Lưu refresh token vào DB
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    return { user: formatUser(user), accessToken, refreshToken, message: "Đăng nhập thành công" };
 };
 
-export default { register, login };
+const refreshTokenService = async ({ refreshToken }) => {
+    if (!refreshToken) {
+        throw createError.BadRequest("Refresh token là bắt buộc");
+    }
+
+    try {
+        // Kiểm tra tính hợp lệ của token
+        const decoded = verifyRefreshToken(refreshToken);
+
+        // Tìm user với refresh token
+        const user = await User.findOne({ _id: decoded.userId, refreshToken }).populate("role");
+
+        if (!user) {
+            throw createError.Unauthorized("Refresh token không hợp lệ hoặc đã hết hạn");
+        }
+
+        // Tạo tokens mới
+        const newAccessToken = generateAccessToken({
+            userId: user._id,
+            role: user.role ? user.role.code : "USER"
+        });
+
+        const newRefreshToken = generateRefreshToken({
+            userId: user._id,
+            role: user.role ? user.role.code : "USER"
+        });
+
+        // Cập nhật refresh token trong DB
+        user.refreshToken = newRefreshToken;
+        await user.save();
+
+        return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+        throw createError.Unauthorized("Refresh token không hợp lệ hoặc đã hết hạn");
+    }
+};
+
+const logout = async (userId) => {
+    const user = await User.findById(userId);
+    if (!user) {
+        throw createError.NotFound("User không tồn tại");
+    }
+
+    // Xóa refresh token
+    user.refreshToken = null;
+    await user.save();
+
+    return { message: "Đăng xuất thành công" };
+};
+
+export default { register, login, refreshTokenService, logout, formatUser };

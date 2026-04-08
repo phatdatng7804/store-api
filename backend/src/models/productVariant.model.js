@@ -1,26 +1,47 @@
 import mongoose from "mongoose";
 
 const productVariantSchema = new mongoose.Schema({
-    product:{
+    product: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Product",
+        required: true
     },
-    size:{
+    size: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Size",
     },
-    color:{
+    color: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Color",
     },
-    price:{
+    name: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    sku: {
+        type: String,
+        trim: true,
+        unique: true,
+        sparse: true
+    },
+    price: {
         type: Number,
         required: true
     },
-    stock:{
+    stock: {
         type: Number,
-        required: true
+        required: true,
+        default: 0
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
+    deletedAt: {
+        type: Date,
+        default: null
     }
-}, {timestamps: true})
+}, { timestamps: true });
 
 export default mongoose.model("ProductVariant", productVariantSchema);
