@@ -4,9 +4,9 @@ import Role from "../models/role.model.js";
 await mongoose.connect("mongodb://127.0.0.1:27017/storedb");
 
 const roles = [
-  { name: "admin" },
-  { name: "user" },
-  { name: "staff" }
+  { code: "ADMIN", name: "admin" },
+  { code: "USER", name: "user" },
+  { code: "STAFF", name: "staff" }
 ];
 
 for (const role of roles) {
