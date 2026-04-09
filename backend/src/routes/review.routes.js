@@ -8,6 +8,23 @@ const router = Router();
 const fmt = (doc) => doc ? JSON.parse(JSON.stringify(doc)) : null;
 const fmtAll = (docs) => JSON.parse(JSON.stringify(docs));
 
+// GET /api/reviews  - lấy tất cả review (admin/list)
+router.get("/", async (req, res, next) => {
+    try {
+        const { includeDeleted = "false", limit = "200" } = req.query;
+        const lim = Math.max(1, Math.min(Number(limit) || 200, 500));
+        const filter = includeDeleted === "true" ? {} : { isDeleted: false };
+
+        const reviews = await Review.find(filter)
+            .populate("user", "username fullName avatarUrl email")
+            .populate("product", "name imageUrl")
+            .sort({ createdAt: -1 })
+            .limit(lim);
+
+        res.json(fmtAll(reviews));
+    } catch (e) { next(e); }
+});
+
 // GET /api/reviews/product/:productId  - lấy tất cả review của 1 sản phẩm
 router.get("/product/:productId", async (req, res, next) => {
     try {

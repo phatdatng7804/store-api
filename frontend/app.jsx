@@ -1568,7 +1568,8 @@ function AdminPage({ onToast }) {
     { key: "orders", label: "🛒 Đơn hàng", endpoint: "/api/orders" },
     { key: "coupons", label: "🎟️ Mã giảm giá", endpoint: "/api/coupons" },
     { key: "revenue-stats", label: "📊 Doanh thu", endpoint: "/api/admin/revenue-stats" },
-    { key: "reviews", label: "⭐ Đánh giá", endpoint: "/api/reviews" }
+    { key: "reviews", label: "⭐ Đánh giá", endpoint: "/api/reviews" },
+    { key: "feedback", label: "💬 Phản hồi", endpoint: "/api/admin/feedback" }
   ];
   const [activeModule, setActiveModule] = useState("products");
   const [items, setItems] = useState([]);
@@ -1695,6 +1696,7 @@ function AdminPage({ onToast }) {
   const isCouponModule = activeModule === "coupons";
   const isRevenueStatsModule = activeModule === "revenue-stats";
   const isReviewsModule = activeModule === "reviews";
+  const isFeedbackModule = activeModule === "feedback";
   const [period, setPeriod] = useState("month");
 
   const stockByProductId = allVariants.reduce((acc, variant) => {
@@ -2042,7 +2044,7 @@ function AdminPage({ onToast }) {
         </nav>
       </aside>
 
-      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: isRevenueStatsModule || isReviewsModule ? "1fr" : "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
+      <div className="admin-content" style={{ flexGrow: 1, display: "grid", gridTemplateColumns: isRevenueStatsModule || isReviewsModule || isFeedbackModule ? "1fr" : "1fr 400px", gap: "1.5rem", minWidth: 0, alignItems: "start" }}>
         <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           <h3 style={{ marginBottom: "1rem" }}>{currentModule?.label}</h3>
           {isRevenueStatsModule ? (
@@ -2056,6 +2058,8 @@ function AdminPage({ onToast }) {
             </div>
           ) : isReviewsModule ? (
             <ReviewsManagementDisplay />
+          ) : isFeedbackModule ? (
+            <FeedbackManagementDisplay />
           ) : (
             <>
               {isProductModule && (
@@ -2115,7 +2119,8 @@ function AdminPage({ onToast }) {
             </>
           )}
         </div>
-        <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
+        {!isRevenueStatsModule && !isReviewsModule && !isFeedbackModule && (
+          <div style={{ background: "var(--surface2)", padding: "1.5rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
           {isCouponModule ? (
             <>
               <h3>{selectedId ? "✏️ Chỉnh sửa mã giảm giá" : "➕ Tạo mã giảm giá"}</h3>
@@ -2553,9 +2558,800 @@ function AdminPage({ onToast }) {
               </div>
             </>
           )}
-        </div>
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+function RevenueStatsDisplay({ period }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError("");
+    api.get(`/api/admin/revenue-stats?period=${encodeURIComponent(period || "month")}`)
+      .then((d) => { if (alive) setData(d); })
+      .catch((e) => { if (alive) setError(e.message || "Không thể tải doanh thu"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [period]);
+
+  if (loading) return <div className="notice">Đang tải doanh thu…</div>;
+  if (error) return <div className="notice error">Lỗi: {error}</div>;
+  if (!data) return null;
+
+  const totalRevenue = Number(data.totalRevenue || 0);
+  const ordersCount = Number(data.ordersCount || 0);
+  const byStatus = data.orderByStatus || {};
+  const byMethod = data.revenueByMethod || {};
+  const top = Array.isArray(data.topProducts) ? data.topProducts : [];
+
+  return (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "1rem" }}>
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Tổng doanh thu</div>
+          <div style={{ fontSize: "1.25rem", fontWeight: 800, marginTop: "0.25rem" }}>{formatVND(totalRevenue)}</div>
+        </div>
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Số đơn (kỳ chọn)</div>
+          <div style={{ fontSize: "1.25rem", fontWeight: 800, marginTop: "0.25rem" }}>{ordersCount}</div>
+        </div>
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>COD</div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 800, marginTop: "0.25rem" }}>{formatVND(Number(byMethod.COD || 0))}</div>
+        </div>
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>MoMo</div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 800, marginTop: "0.25rem" }}>{formatVND(Number(byMethod.MOMO || 0))}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <h4 style={{ marginTop: 0 }}>Trạng thái đơn</h4>
+          <div className="summary-list">
+            <p>Đã thanh toán <span>{Number(byStatus.PAID || 0)}</span></p>
+            <p>Đang chờ <span>{Number(byStatus.PENDING || 0)}</span></p>
+            <p>Đã hủy <span>{Number(byStatus.CANCELLED || 0)}</span></p>
+            <p>Thất bại <span>{Number(byStatus.FAILED || 0)}</span></p>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "1rem", background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <h4 style={{ marginTop: 0 }}>Top sản phẩm</h4>
+          {top.length === 0 ? (
+            <div className="notice">Chưa có dữ liệu trong kỳ này.</div>
+          ) : (
+            <div style={{ display: "grid", gap: "0.5rem" }}>
+              {top.map((p, idx) => (
+                <div key={p.variantId || idx} style={{ display: "flex", gap: "0.75rem", justifyContent: "space-between", border: "1px solid var(--border)", borderRadius: "10px", padding: "0.6rem 0.75rem" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.productName || "—"}</div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>SL: {Number(p.totalQuantity || 0)}</div>
+                  </div>
+                  <div style={{ fontWeight: 800 }}>{formatVND(Number(p.totalRevenue || 0))}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewsManagementDisplay() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [reviews, setReviews] = useState([]);
+  const [q, setQ] = useState("");
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    api.get("/api/reviews")
+      .then((d) => setReviews(Array.isArray(d) ? d : []))
+      .catch((e) => { setReviews([]); setError(e.message || "Không thể tải đánh giá"); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = reviews.filter((r) => {
+    const text = `${r?.product?.name || ""} ${r?.user?.fullName || ""} ${r?.user?.username || ""} ${r?.title || ""} ${r?.comment || ""}`.toLowerCase();
+    return text.includes((q || "").trim().toLowerCase());
+  });
+
+  const remove = async (id) => {
+    if (!id) return;
+    if (!confirm("Xóa (ẩn) đánh giá này?")) return;
+    try {
+      await api.del(`/api/reviews/${id}`);
+      load();
+    } catch (e) {
+      alert("Lỗi: " + (e.message || "Không thể xóa"));
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flex: 1, minWidth: "260px" }}>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Tìm theo sản phẩm / user / nội dung…"
+            style={{ flex: 1, padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+          />
+          <button type="button" className="ghost" onClick={load}>Tải lại</button>
+        </div>
+        <div className="notice" style={{ margin: 0 }}>Tổng: <strong>{filtered.length}</strong></div>
+      </div>
+
+      {loading && <div className="notice">Đang tải đánh giá…</div>}
+      {error && <div className="notice error">Lỗi: {error}</div>}
+
+      <div style={{ display: "grid", gap: "0.75rem" }}>
+        {filtered.map((r) => (
+          <div key={r.id || r._id} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "0.9rem", background: "var(--surface)" }}>
+            <div style={{ display: "flex", gap: "0.75rem", justifyContent: "space-between", alignItems: "start" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {r?.product?.name || "Sản phẩm"} · {r?.rating ? `⭐ ${r.rating}/5` : "—"}
+                </div>
+                <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                  {r?.user?.fullName || r?.user?.username || "User"}{r?.isVerifiedPurchase ? " · Đã mua hàng" : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+                <button type="button" className="ghost small" onClick={() => remove(r.id || r._id)}>Xóa</button>
+              </div>
+            </div>
+            {(r?.title || r?.comment) && (
+              <div style={{ marginTop: "0.5rem", color: "#e2e8f0", whiteSpace: "pre-wrap" }}>
+                {r?.title && <div style={{ fontWeight: 700 }}>{r.title}</div>}
+                {r?.comment && <div style={{ color: "#cbd5e1", marginTop: r?.title ? "0.25rem" : 0 }}>{r.comment}</div>}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {!loading && filtered.length === 0 && <div className="notice">Không có đánh giá để hiển thị.</div>}
+      </div>
+    </div>
+  );
+}
+
+function FeedbackManagementDisplay() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState([]);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (status) params.set("status", status);
+    api.get(`/api/admin/feedback?${params.toString()}`)
+      .then((d) => setItems(Array.isArray(d) ? d : []))
+      .catch((e) => { setItems([]); setError(e.message || "Không thể tải phản hồi"); })
+      .finally(() => setLoading(false));
+  }, [q, status]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const selected = items.find((i) => i.id === selectedId) || null;
+  useEffect(() => { setNote(selected?.adminNote || ""); }, [selectedId]); // reset note when switching selection
+
+  const badge = (s) => {
+    const map = {
+      NEW: { text: "Mới", cls: "stock-tag in" },
+      IN_PROGRESS: { text: "Đang xử lý", cls: "stock-tag in" },
+      RESOLVED: { text: "Đã xử lý", cls: "stock-tag out" },
+      SPAM: { text: "Spam", cls: "stock-tag out" },
+    };
+    return map[s] || { text: s || "—", cls: "stock-tag in" };
+  };
+
+  const save = async () => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await api.patch(`/api/admin/feedback/${selected.id}`, { adminNote: note });
+      load();
+    } catch (e) {
+      alert("Lỗi: " + (e.message || "Không thể lưu"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setStatusFor = async (s) => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await api.patch(`/api/admin/feedback/${selected.id}`, { status: s });
+      load();
+    } catch (e) {
+      alert("Lỗi: " + (e.message || "Không thể cập nhật"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!selected) return;
+    if (!confirm("Xóa phản hồi này?")) return;
+    setSaving(true);
+    try {
+      await api.del(`/api/admin/feedback/${selected.id}`);
+      setSelectedId(null);
+      load();
+    } catch (e) {
+      alert("Lỗi: " + (e.message || "Không thể xóa"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "1rem", alignItems: "start" }}>
+      <div style={{ display: "grid", gap: "0.75rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Tìm theo tên / SĐT / email / nội dung…"
+            style={{ flex: 1, minWidth: "260px", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+          />
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            style={{ padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+          >
+            <option value="">Tất cả trạng thái</option>
+            <option value="NEW">Mới</option>
+            <option value="IN_PROGRESS">Đang xử lý</option>
+            <option value="RESOLVED">Đã xử lý</option>
+            <option value="SPAM">Spam</option>
+          </select>
+          <button type="button" className="ghost" onClick={load}>Tải</button>
+        </div>
+
+        {loading && <div className="notice">Đang tải phản hồi…</div>}
+        {error && <div className="notice error">Lỗi: {error}</div>}
+
+        <div className="admin-list">
+          {items.map((it) => {
+            const b = badge(it.status);
+            return (
+              <button
+                key={it.id}
+                type="button"
+                className={selectedId === it.id ? "admin-row selected" : "admin-row"}
+                onClick={() => setSelectedId(it.id)}
+              >
+                <strong>#{String(it.id).slice(-6)}</strong>
+                <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {it.fullName || "—"} · {it.subject || "—"}
+                </span>
+                <span className={b.cls} style={{ flexShrink: 0 }}>{b.text}</span>
+              </button>
+            );
+          })}
+          {!loading && items.length === 0 && <div className="notice">Chưa có phản hồi.</div>}
+        </div>
+      </div>
+
+      <div style={{ background: "var(--surface2)", padding: "1rem", borderRadius: "var(--radius)", boxShadow: "var(--shadow)" }}>
+        {!selected ? (
+          <div className="notice">Chọn 1 phản hồi để xem chi tiết.</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "start" }}>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ marginTop: 0, marginBottom: "0.25rem" }}>{selected.fullName || "—"}</h3>
+                <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                  {selected.email ? <span>{selected.email}</span> : <span>—</span>} · {selected.phone ? <span>{selected.phone}</span> : <span>—</span>}
+                </div>
+                {selected.createdAt && (
+                  <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                    {new Date(selected.createdAt).toLocaleString("vi-VN")}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button type="button" className="ghost small" disabled={saving} onClick={() => setStatusFor("NEW")}>Mới</button>
+                <button type="button" className="ghost small" disabled={saving} onClick={() => setStatusFor("IN_PROGRESS")}>Đang xử lý</button>
+                <button type="button" className="ghost small" disabled={saving} onClick={() => setStatusFor("RESOLVED")}>Đã xử lý</button>
+                <button type="button" className="ghost small" disabled={saving} onClick={() => setStatusFor("SPAM")}>Spam</button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: "0.75rem" }}>
+              <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Chủ đề</div>
+              <div style={{ fontWeight: 700 }}>{selected.subject || "—"}</div>
+            </div>
+
+            <div style={{ marginTop: "0.75rem" }}>
+              <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Nội dung</div>
+              <div style={{ whiteSpace: "pre-wrap", marginTop: "0.25rem", color: "#e2e8f0" }}>{selected.message || "—"}</div>
+            </div>
+
+            <div style={{ marginTop: "0.75rem" }}>
+              <label style={{ display: "block", fontWeight: 700, marginBottom: "0.35rem" }}>Ghi chú nội bộ</label>
+              <textarea
+                rows={6}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="VD: đã gọi khách, hẹn đổi size..."
+                style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)", resize: "vertical" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <button type="button" className="ghost" disabled={saving} onClick={remove}>Xóa</button>
+                <button type="button" className="btn-main" disabled={saving} onClick={save}>
+                  {saving ? "Đang lưu..." : "Lưu ghi chú"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Static info pages (footer & hash routes) ─────────────────────────────────
+function AboutPage() {
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "720px", margin: "0 auto" }}>
+        <h2>Về VELA</h2>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          VELA là cửa hàng thời trang hiện đại, hướng tới phong cách tối giản và đa dụng cho công sở,
+          phố và phụ kiện. Chúng tôi chọn lọc chất liệu và form dáng để mỗi món đồ đều dễ phối hợp.
+        </p>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          Miễn phí vận chuyển cho đơn từ 999.000₫ · Thanh toán an toàn với MoMo.
+        </p>
+      </article>
+    </section>
+  );
+}
+
+function ContactPage() {
+  const [form, setForm] = useState({
+    fullName: "",
+    phone: "",
+    email: "",
+    subject: "Hỗ trợ đơn hàng",
+    message: "",
+  });
+  const [status, setStatus] = useState({ type: "", message: "" });
+
+  const setField = (key, value) => {
+    setStatus({ type: "", message: "" });
+    setForm((p) => ({ ...p, [key]: value }));
+  };
+
+  const validate = () => {
+    const fullName = form.fullName.trim();
+    const phone = form.phone.trim();
+    const email = form.email.trim();
+    const message = form.message.trim();
+    if (!fullName) return "Vui lòng nhập họ tên.";
+    if (!phone && !email) return "Vui lòng nhập số điện thoại hoặc email để shop phản hồi.";
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return "Email không hợp lệ.";
+    if (phone && !/^[0-9+\s().-]{8,20}$/.test(phone)) return "Số điện thoại không hợp lệ.";
+    if (!message) return "Vui lòng nhập nội dung cần hỗ trợ.";
+    return "";
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const err = validate();
+    if (err) {
+      setStatus({ type: "error", message: err });
+      return;
+    }
+    setStatus({ type: "", message: "" });
+    api.post("/api/feedback", {
+      fullName: form.fullName.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      subject: form.subject,
+      message: form.message.trim(),
+      source: "contact",
+    }).then(() => {
+      setStatus({
+        type: "success",
+        message:
+          "Đã gửi phản hồi thành công. Shop sẽ liên hệ lại sớm qua email/điện thoại. Bạn cũng có thể chat trực tiếp bằng nút 💬.",
+      });
+      setForm((p) => ({ ...p, message: "" }));
+    }).catch((e) => {
+      setStatus({ type: "error", message: "Gửi thất bại: " + (e.message || "Lỗi không xác định") });
+    });
+  };
+
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "920px", margin: "0 auto" }}>
+        <h2>Liên hệ</h2>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          Bạn cần hỗ trợ đơn hàng, đổi trả hoặc tư vấn size? Hãy liên hệ qua các kênh sau (giờ làm việc 9:00–18:00).
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.1fr", gap: "1rem", marginTop: "1rem" }}>
+          <div style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "1rem" }}>
+            <h3 style={{ marginTop: 0 }}>Thông tin cửa hàng</h3>
+            <div className="summary-list">
+              <p>Hotline <span><a href="tel:19008386" style={{ color: "#a78bfa" }}>1900 VELA</a></span></p>
+              <p>Email <span><a href="mailto:support@vela-shop.vn" style={{ color: "#a78bfa" }}>support@vela-shop.vn</a></span></p>
+              <p>Giờ làm việc <span>09:00 – 18:00 (T2–CN)</span></p>
+              <p>Địa chỉ <span>TP.HCM (cập nhật địa chỉ thật khi triển khai)</span></p>
+            </div>
+
+            <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <a className="btn-main small" href="mailto:support@vela-shop.vn?subject=H%E1%BB%97%20tr%E1%BB%A3%20t%E1%BB%AB%20website%20VELA">Gửi email</a>
+              <button type="button" className="ghost" onClick={() => { window.open("https://www.facebook.com/thai.ang.746808/", "_blank", "noopener,noreferrer"); }}>
+                Facebook
+              </button>
+              <button type="button" className="ghost" onClick={() => { window.open("https://www.instagram.com/dang17.4/", "_blank", "noopener,noreferrer"); }}>
+                Instagram
+              </button>
+            </div>
+
+            <div style={{ marginTop: "1rem" }}>
+              <h4 style={{ margin: "0 0 0.5rem" }}>Bản đồ</h4>
+              <iframe
+                title="VELA map"
+                src="https://www.google.com/maps?q=Ho%20Chi%20Minh%20City&output=embed"
+                width="100%"
+                height="220"
+                style={{ border: 0, borderRadius: "12px" }}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+              <p style={{ color: "#94a3b8", fontSize: "0.85rem", margin: "0.5rem 0 0" }}>
+                Gợi ý: bạn có thể thay link map theo địa chỉ cửa hàng thật.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "1rem" }}>
+            <h3 style={{ marginTop: 0 }}>Gửi yêu cầu hỗ trợ</h3>
+            <p style={{ color: "#94a3b8", marginTop: 0 }}>
+              Điền thông tin, shop sẽ phản hồi qua email/điện thoại. Nếu cần nhanh, hãy dùng nút chat 💬.
+            </p>
+
+            {status.message && (
+              <div className={`notice ${status.type === "error" ? "error" : ""}`} style={{ marginBottom: "0.75rem" }}>
+                {status.type === "error" ? "⚠️ " : "✅ "}
+                {status.message}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                <div>
+                  <label style={{ display: "block", fontWeight: 600, marginBottom: "0.35rem" }}>Họ tên</label>
+                  <input
+                    value={form.fullName}
+                    onChange={(e) => setField("fullName", e.target.value)}
+                    placeholder="Nguyễn Văn A"
+                    style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontWeight: 600, marginBottom: "0.35rem" }}>Chủ đề</label>
+                  <select
+                    value={form.subject}
+                    onChange={(e) => setField("subject", e.target.value)}
+                    style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+                  >
+                    <option>Hỗ trợ đơn hàng</option>
+                    <option>Tư vấn size / sản phẩm</option>
+                    <option>Đổi trả / bảo hành</option>
+                    <option>Góp ý dịch vụ</option>
+                    <option>Khác</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                <div>
+                  <label style={{ display: "block", fontWeight: 600, marginBottom: "0.35rem" }}>Số điện thoại</label>
+                  <input
+                    value={form.phone}
+                    onChange={(e) => setField("phone", e.target.value)}
+                    placeholder="09xx..."
+                    style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontWeight: 600, marginBottom: "0.35rem" }}>Email</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setField("email", e.target.value)}
+                    placeholder="you@email.com"
+                    style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)" }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontWeight: 600, marginBottom: "0.35rem" }}>Nội dung</label>
+                <textarea
+                  value={form.message}
+                  onChange={(e) => setField("message", e.target.value)}
+                  placeholder="Ví dụ: Mình muốn đổi size đơn #1234 từ M sang L..."
+                  rows={6}
+                  style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)", resize: "vertical" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setStatus({ type: "", message: "" });
+                    setForm({ fullName: "", phone: "", email: "", subject: "Hỗ trợ đơn hàng", message: "" });
+                  }}
+                >
+                  Xóa form
+                </button>
+                <button type="submit" className="btn-main">Gửi yêu cầu</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function SizeGuidePage() {
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "720px", margin: "0 auto" }}>
+        <h2>Hướng dẫn chọn size</h2>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          Shop sử dụng bảng size chuẩn <strong>XS · S · M · L · XL</strong>. Nên đo vòng ngực, eo và chiều dài tay
+          rồi đối chiếu bảng size trên từng sản phẩm (nếu có). Khi phân vân giữa hai size, ưu tiên size lớn hơn cho form rộng rãi.
+        </p>
+      </article>
+    </section>
+  );
+}
+
+function ShippingPolicyPage() {
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "720px", margin: "0 auto" }}>
+        <h2>Chính sách vận chuyển</h2>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          Đơn từ <strong>999.000₫</strong> được miễn phí giao hàng nội địa. Thời gian giao dự kiến thường từ 2–5 ngày làm việc
+          tùy khu vực. Mã vận đơn sẽ được cập nhật khi đơn chuyển sang trạng thái giao hàng.
+        </p>
+      </article>
+    </section>
+  );
+}
+
+function FAQPage() {
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "720px", margin: "0 auto" }}>
+        <h2>Câu hỏi thường gặp</h2>
+        <dl style={{ color: "#94a3b8", lineHeight: 1.7 }}>
+          <dt style={{ color: "#e2e8f0", marginTop: "1rem" }}>Làm sao để theo dõi đơn?</dt>
+          <dd>Đăng nhập → mục đơn hàng để xem trạng thái và vận chuyển.</dd>
+          <dt style={{ color: "#e2e8f0", marginTop: "1rem" }}>Có thanh toán MoMo không?</dt>
+          <dd>Có, bạn chọn MoMo khi thanh toán và làm theo hướng dẫn trên điện thoại.</dd>
+          <dt style={{ color: "#e2e8f0", marginTop: "1rem" }}>Đổi size được không?</dt>
+          <dd>Xem mục Đổi trả hàng hoặc liên hệ bộ phận hỗ trợ.</dd>
+        </dl>
+      </article>
+    </section>
+  );
+}
+
+function ReturnsPage() {
+  return (
+    <section className="panel">
+      <article className="card" style={{ maxWidth: "720px", margin: "0 auto" }}>
+        <h2>Đổi trả hàng</h2>
+        <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          Sản phẩm còn nguyên tem, chưa qua sử dụng và trong thời hạn đổi trả (thường <strong>7 ngày</strong> kể từ nhận hàng)
+          có thể được hỗ trợ đổi size hoặc hoàn theo chính sách từng đợt hàng. Vui lòng giữ hóa đơn / mã đơn và liên hệ bộ phận chăm sóc khách hàng.
+        </p>
+      </article>
+    </section>
+  );
+}
+
+function ChatbotWidget() {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [sending, setSending] = useState(false);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, open]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setSending(true);
+    try {
+      const history = messages.map((m) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        text: m.text,
+      }));
+      const data = await api.post("/api/chatbot", { message: text, history });
+      const reply = data?.reply || "Không nhận được phản hồi.";
+      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: err?.message || "Không thể kết nối chat. Kiểm tra server hoặc GEMINI_API_KEY." },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Mở chat hỗ trợ"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          position: "fixed",
+          right: "1.25rem",
+          bottom: "1.25rem",
+          width: "3.25rem",
+          height: "3.25rem",
+          borderRadius: "50%",
+          border: "none",
+          cursor: "pointer",
+          zIndex: 9998,
+          background: "linear-gradient(135deg, #7c3aed, #a78bfa)",
+          boxShadow: "0 8px 24px rgba(124, 58, 237, 0.45)",
+          fontSize: "1.5rem",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        💬
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Chat VELA"
+          style={{
+            position: "fixed",
+            right: "1.25rem",
+            bottom: "5rem",
+            width: "min(100vw - 2rem, 380px)",
+            height: "min(70vh, 440px)",
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            background: "#1e1b2e",
+            borderRadius: "16px",
+            border: "1px solid rgba(167, 139, 250, 0.35)",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              background: "rgba(124, 58, 237, 0.25)",
+              fontWeight: 600,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>VELA · Trợ lý</span>
+            <button type="button" className="ghost" style={{ padding: "0.25rem 0.5rem" }} onClick={() => setOpen(false)}>
+              Đóng
+            </button>
+          </div>
+
+          <div
+            ref={listRef}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "0.75rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+            }}
+          >
+            {messages.length === 0 && (
+              <p style={{ color: "#94a3b8", fontSize: "0.9rem", margin: 0 }}>
+                Xin chào! Mình có thể gợi ý size, chính sách giao hàng hoặc hướng dẫn xem Catalog.
+              </p>
+            )}
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                style={{
+                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                  maxWidth: "88%",
+                  padding: "0.5rem 0.75rem",
+                  borderRadius: "12px",
+                  fontSize: "0.9rem",
+                  lineHeight: 1.45,
+                  background: m.role === "user" ? "rgba(124, 58, 237, 0.45)" : "rgba(148, 163, 184, 0.15)",
+                  color: "#e2e8f0",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {m.text}
+              </div>
+            ))}
+            {sending && <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Đang trả lời…</div>}
+          </div>
+
+          <div
+            style={{
+              padding: "0.75rem",
+              borderTop: "1px solid rgba(148, 163, 184, 0.2)",
+              display: "flex",
+              gap: "0.5rem",
+            }}
+          >
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
+              placeholder="Nhập câu hỏi…"
+              disabled={sending}
+              style={{
+                flex: 1,
+                padding: "0.5rem 0.75rem",
+                borderRadius: "10px",
+                border: "1px solid var(--border, #334155)",
+                background: "#0f172a",
+                color: "#f1f5f9",
+              }}
+            />
+            <button type="button" className="btn-main small" disabled={sending} onClick={send}>
+              Gửi
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2875,6 +3671,7 @@ function App() {
       />
 
       <ProductDetailModal detail={detailProduct} onClose={() => setDetailProduct(null)} />
+      <ChatbotWidget />
     </div>
   );
 }
