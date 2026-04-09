@@ -13,6 +13,7 @@ import User from "../models/user.model.js";
 import Coupon from "../models/coupon.model.js";
 import Role from "../models/role.model.js";
 import Review from "../models/review.model.js";
+import Feedback from "../models/feedback.model.js";
 
 const router = Router();
 
@@ -840,6 +841,91 @@ router.get("/admin/revenue-stats", async (req, res, next) => {
             revenueByMethod,
             ordersCount: orders.length
         });
+    } catch (e) { next(e); }
+});
+
+// ── FEEDBACK / CONTACT ────────────────────────────────────────────────────────
+
+// POST /api/feedback - public submit (from Contact page)
+router.post("/feedback", async (req, res, next) => {
+    try {
+        const { fullName, phone = "", email = "", subject = "Khác", message, source = "contact" } = req.body || {};
+
+        if (!String(fullName || "").trim()) return res.status(400).json({ error: "Vui lòng nhập họ tên" });
+        if (!String(message || "").trim()) return res.status(400).json({ error: "Vui lòng nhập nội dung" });
+
+        const cleanEmail = String(email || "").trim();
+        const cleanPhone = String(phone || "").trim();
+        if (!cleanEmail && !cleanPhone) {
+            return res.status(400).json({ error: "Vui lòng nhập số điện thoại hoặc email để shop phản hồi" });
+        }
+        if (cleanEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+            return res.status(400).json({ error: "Email không hợp lệ" });
+        }
+        if (cleanPhone && !/^[0-9+\s().-]{8,20}$/.test(cleanPhone)) {
+            return res.status(400).json({ error: "Số điện thoại không hợp lệ" });
+        }
+
+        const doc = await Feedback.create({
+            fullName: String(fullName).trim(),
+            phone: cleanPhone,
+            email: cleanEmail,
+            subject: String(subject || "Khác").trim(),
+            message: String(message).trim(),
+            source: String(source || "contact").trim()
+        });
+        res.status(201).json(fmt(doc));
+    } catch (e) { next(e); }
+});
+
+// GET /api/admin/feedback - list
+router.get("/admin/feedback", async (req, res, next) => {
+    try {
+        const { status = "", q = "", limit = "200", includeDeleted = "false" } = req.query;
+        const lim = Math.max(1, Math.min(Number(limit) || 200, 500));
+
+        const filter = includeDeleted === "true" ? {} : { isDeleted: false };
+        if (status) filter.status = status;
+        if (q) {
+            const regex = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+            filter.$or = [
+                { fullName: regex },
+                { phone: regex },
+                { email: regex },
+                { subject: regex },
+                { message: regex }
+            ];
+        }
+
+        const items = await Feedback.find(filter).sort({ createdAt: -1 }).limit(lim);
+        res.json(fmtAll(items));
+    } catch (e) { next(e); }
+});
+
+// PATCH /api/admin/feedback/:id - update status/note
+router.patch("/admin/feedback/:id", async (req, res, next) => {
+    try {
+        const { status, adminNote } = req.body || {};
+        const update = {};
+        if (typeof status === "string" && status) update.status = status;
+        if (typeof adminNote === "string") update.adminNote = adminNote;
+
+        const doc = await Feedback.findByIdAndUpdate(req.params.id, update, { new: true });
+        if (!doc) return res.status(404).json({ error: "Không tìm thấy phản hồi" });
+        res.json(fmt(doc));
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/admin/feedback/:id - soft delete
+router.delete("/admin/feedback/:id", async (req, res, next) => {
+    try {
+        const doc = await Feedback.findByIdAndUpdate(
+            req.params.id,
+            { isDeleted: true, deletedAt: new Date() },
+            { new: true }
+        );
+        if (!doc) return res.status(404).json({ error: "Không tìm thấy phản hồi" });
+        res.json({ message: "Đã xóa phản hồi" });
     } catch (e) { next(e); }
 });
 
